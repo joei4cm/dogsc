@@ -107,6 +107,35 @@ open ".build/local/DogSC Dev.app"
 
 </details>
 
+## Linux（Ubuntu / Omarchy）
+
+macOS 版依赖 ScreenCaptureKit、AppKit 和 AVFoundation，不能在 Linux 上编译。Ubuntu 和 Omarchy 使用仓库里的 Linux 版：录制、分割、裁剪、按点击运镜，以及带留白、圆角和背景的 MP4 导出。
+
+它按当前桌面选择捕获方式：
+
+| 环境 | 捕获 |
+| --- | --- |
+| Ubuntu on Xorg，以及其他 X11 会话 | ffmpeg `x11grab` |
+| Omarchy / Hyprland | `wf-recorder`，区域选择用 `slurp` |
+| Ubuntu Wayland（GNOME） | `xdg-desktop-portal`，需要 ffmpeg 的 PipeWire 支持或 `gstreamer1.0-pipewire` |
+
+```bash
+# 需要 Python 3.11+、ffmpeg、ffprobe
+linux/bin/dogsc doctor
+linux/bin/dogsc            # 打开本地剪辑界面
+linux/bin/dogsc record --fps 60 --system
+# 录制过程中，另开一个终端：
+linux/bin/dogsc mark
+```
+
+Omarchy 可以把标记绑到 `Ctrl+Alt+M`：
+
+```
+bind = CTRL ALT, M, exec, dogsc mark
+```
+
+`linux/bin/dogsc install` 会在当前用户的应用菜单里加入 DogSC。Linux 项目保存在 `~/.local/share/dogsc/`，格式与 macOS 项目不同，不能互换打开。3D 倾斜、摄像头叠层和 iPhone 采集仍只在 macOS 版提供。
+
 ## 许可
 
 源代码采用 [MIT License](LICENSE)。随附字体遵循其自身许可，见 [字体说明](Resources/Fonts/README.md)。

@@ -12,4 +12,6 @@ DerivedData/
 *.keychain-db
 *.dogscproject/
 *.silkyproject/
+__pycache__/
+*.pyc
 /open-check-project.command
