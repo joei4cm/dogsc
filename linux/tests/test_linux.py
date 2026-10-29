@@ -161,6 +161,7 @@ class ExportTests(unittest.TestCase):
     def test_canvas_and_rendered_file(self):
         self.assertEqual(canvas_size(1280, 720, "16:9", "1080p"), (1920, 1080))
         self.assertEqual(canvas_size(1280, 720, "9:16", "1080p"), (1080, 1920))
+        self.assertEqual(canvas_size(1280, 720, "2.39:1", "1080p")[0], 1920)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "in.mp4"
@@ -172,12 +173,21 @@ class ExportTests(unittest.TestCase):
             ], check=True)
             os.environ["DOGSC_HOME"] = str(root / "home")
             project = import_media(source, "导出测试")
-            project["canvas"].update({"aspect": "16:9", "padding": 0.08, "radius": 18, "shadow": 0.4, "background": "#203040"})
+            project["canvas"].update({
+                "aspect": "16:9", "padding": 0.08, "radius": 18, "shadow": 0.4,
+                "background": "#203040", "background_kind": "pattern", "pattern": "obsidianGrid",
+                "screen_frame": "windowDark",
+            })
             project["export"] = {"resolution": "source", "fps": 30}
             project["zooms"] = [{
                 "id": "z", "clip_id": project["clips"][0]["id"], "start": 0.1, "end": 0.7,
                 "scale": 2, "focus_x": 0.2, "focus_y": 0.5, "enter": 0.15, "exit": 0.15,
                 "easing": "cubic", "origin": "manual",
+            }]
+            project["screen_motions"] = [{
+                "id": "m", "clip_id": project["clips"][0]["id"], "start": 0.2, "end": 0.6,
+                "enter": 0.1, "exit": 0.1, "rotation_z": 4, "rotation_x": 8, "rotation_y": -6,
+                "scale": 1, "perspective": 0.7, "position_x": 0.5, "position_y": 0.5, "easing": "cubic",
             }]
             project["draw_cursor"] = True
             project["capture"] = {"cursor_baked": False}
@@ -185,8 +195,9 @@ class ExportTests(unittest.TestCase):
             output = root / "out.mp4"
             command = build_export(project, source, pointer, output, root / "work")
             graph = command[command.index("-filter_complex") + 1]
-            self.assertNotIn("boxblur", graph)
+            self.assertNotIn("boxblur=18:2,format=rgba[shadow]", graph)
             self.assertTrue((root / "work" / "shadow.png").is_file())
+            self.assertTrue((root / "work" / "frame.png").is_file())
             completed = subprocess.run(command, capture_output=True, text=True)
             self.assertEqual(completed.returncode, 0, completed.stderr)
             info = probe(output)

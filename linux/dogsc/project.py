@@ -8,6 +8,16 @@ import uuid
 
 from dogsc.errors import DogSCError
 from dogsc.media import probe, thumbs
+from dogsc.model import (
+    SCHEMA,
+    blank_audio,
+    blank_camera,
+    blank_canvas,
+    blank_clip,
+    blank_cursor,
+    blank_opening,
+    migrate,
+)
 from dogsc.zoom import new_id
 
 
@@ -25,36 +35,34 @@ def projects_dir() -> Path:
     return path
 
 
-def blank_canvas() -> dict:
-    return {
-        "aspect": "16:9",
-        "padding": 0.06,
-        "radius": 28,
-        "shadow": 0.35,
-        "background": "#16161a",
-    }
+def project_dir_parent() -> Path:
+    return home_dir()
 
 
 def new_project(name: str, media: dict, capture: dict | None = None) -> dict:
-    clip_id = new_id()
+    clip = blank_clip(0, float(media["duration"]))
     return {
-        "schema": 1,
+        "schema": SCHEMA,
         "id": uuid.uuid4().hex,
         "name": name,
         "created": datetime.now().astimezone().isoformat(timespec="seconds"),
         "media": media,
-        "clips": [{
-            "id": clip_id,
-            "src_in": 0,
-            "src_out": float(media["duration"]),
-            "speed": 1,
-        }],
+        "clips": [clip],
         "zooms": [],
+        "screen_motions": [],
+        "mosaics": [],
+        "stickers": [],
         "markers": [],
         "canvas": blank_canvas(),
+        "cursor": blank_cursor(),
+        "audio": blank_audio(),
+        "camera": blank_camera(),
+        "opening": blank_opening(),
         "export": {"resolution": "1080p", "fps": 30 if float(media.get("fps") or 30) < 45 else 60},
         "capture": capture or {"backend": "import", "cursor_baked": True, "geometry": None},
         "draw_cursor": not bool((capture or {}).get("cursor_baked", True)),
+        "history": [],
+        "history_index": -1,
     }
 
 
@@ -68,10 +76,12 @@ def load(project_id: str) -> dict:
     path = project_dir(project_id) / "project.json"
     if not path.exists():
         raise DogSCError("找不到这个项目。")
-    return json.loads(path.read_text(encoding="utf-8"))
+    project = migrate(json.loads(path.read_text(encoding="utf-8")))
+    return project
 
 
 def save(project: dict) -> None:
+    project = migrate(project)
     directory = project_dir(project["id"])
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / "project.json"
@@ -136,3 +146,62 @@ def media_path(project_id: str) -> Path:
     if not path.exists():
         raise DogSCError("项目里还没有视频。")
     return path
+
+
+def assets_dir(project_id: str) -> Path:
+    path = project_dir(project_id) / "assets"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def push_history(project: dict) -> dict:
+    """Store a lightweight undo snapshot of editable fields."""
+    snapshot = {
+        "clips": project.get("clips"),
+        "zooms": project.get("zooms"),
+        "screen_motions": project.get("screen_motions"),
+        "mosaics": project.get("mosaics"),
+        "stickers": project.get("stickers"),
+        "markers": project.get("markers"),
+        "canvas": project.get("canvas"),
+        "cursor": project.get("cursor"),
+        "audio": project.get("audio"),
+        "camera": project.get("camera"),
+        "opening": project.get("opening"),
+        "export": project.get("export"),
+        "draw_cursor": project.get("draw_cursor"),
+        "name": project.get("name"),
+    }
+    history = list(project.get("history") or [])
+    index = int(project.get("history_index") if project.get("history_index") is not None else len(history) - 1)
+    history = history[: index + 1]
+    history.append(json.loads(json.dumps(snapshot)))
+    if len(history) > 40:
+        history = history[-40:]
+    project["history"] = history
+    project["history_index"] = len(history) - 1
+    return project
+
+
+def undo(project: dict) -> dict:
+    history = list(project.get("history") or [])
+    index = int(project.get("history_index") if project.get("history_index") is not None else -1)
+    if index <= 0 or not history:
+        raise DogSCError("没有可撤销的操作。")
+    index -= 1
+    project.update(history[index])
+    project["history"] = history
+    project["history_index"] = index
+    return project
+
+
+def redo(project: dict) -> dict:
+    history = list(project.get("history") or [])
+    index = int(project.get("history_index") if project.get("history_index") is not None else -1)
+    if index + 1 >= len(history):
+        raise DogSCError("没有可重做的操作。")
+    index += 1
+    project.update(history[index])
+    project["history"] = history
+    project["history_index"] = index
+    return project

@@ -103,33 +103,118 @@ ARROW = [
 ]
 
 
-def cursor_png(path: Path) -> None:
-    height = len(ARROW)
-    width = max(len(row) for row in ARROW)
+HAND = [
+    "....XXXX........",
+    "...X....X.......",
+    "...X....X.......",
+    "...X....XXXX....",
+    "...X....X...X...",
+    "XXXX....X...X...",
+    "X..X....X...X...",
+    "X..X........X...",
+    "X..X........X...",
+    "X..XXXXXXXXXX...",
+    "X...........X...",
+    ".X..........X...",
+    ".X..........X...",
+    "..XXXXXXXXXX....",
+]
+
+CROSS = [
+    ".......X........",
+    ".......X........",
+    ".......X........",
+    ".......X........",
+    "XXXXXXX.XXXXXXX.",
+    ".......X........",
+    ".......X........",
+    ".......X........",
+    ".......X........",
+]
+
+IBEAM = [
+    "..XXXXX..XXXXX..",
+    ".....X..X.......",
+    "......XX........",
+    "......XX........",
+    "......XX........",
+    "......XX........",
+    "......XX........",
+    ".....X..X.......",
+    "..XXXXX..XXXXX..",
+]
+
+
+def cursor_png(path: Path, asset: str = "system.arrow", scale: float = 1.0) -> None:
+    if asset == "system.hidden":
+        write_png(path, [bytes([0, 0, 0, 0])])
+        return
+    if asset == "system.touch-dot":
+        size = max(int(18 * scale), 10)
+        rows = []
+        cx = cy = size / 2
+        radius = size / 2 - 1
+        for y in range(size):
+            row = bytearray(size * 4)
+            for x in range(size):
+                dist = ((x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2) ** 0.5
+                if dist <= radius:
+                    row[x * 4:x * 4 + 4] = b"\xff\xff\xff\xd8"
+                elif dist <= radius + 1.2:
+                    row[x * 4:x * 4 + 4] = b"\x11\x11\x14\xff"
+            rows.append(bytes(row))
+        write_png(path, rows)
+        return
+    glyph = ARROW
+    if asset == "system.pointing-hand":
+        glyph = HAND
+    elif asset == "system.crosshair":
+        glyph = CROSS
+    elif asset == "system.ibeam":
+        glyph = IBEAM
+    height = len(glyph)
+    width = max(len(row) for row in glyph)
     rows = []
-    for y, line in enumerate(ARROW):
+    for y, line in enumerate(glyph):
         row = bytearray(width * 4)
         padded = line.ljust(width, ".")
         for x, pixel in enumerate(padded):
-            if pixel != "X":
-                continue
-            # A one-pixel dark rim keeps the arrow readable on light footage.
-            row[x * 4:x * 4 + 4] = b"\xff\xff\xff\xff"
+            if pixel == "X":
+                row[x * 4:x * 4 + 4] = b"\xff\xff\xff\xff"
         rows.append(bytes(row))
-    for y, line in enumerate(ARROW):
+    for y, line in enumerate(glyph):
         padded = line.ljust(width, ".")
         for x, pixel in enumerate(padded):
             if pixel == "X":
                 continue
             if any(
-                0 <= y + dy < height and 0 <= x + dx < width and ARROW[y + dy].ljust(width, ".")[x + dx] == "X"
+                0 <= y + dy < height and 0 <= x + dx < width and glyph[y + dy].ljust(width, ".")[x + dx] == "X"
                 for dy in (-1, 0, 1)
                 for dx in (-1, 0, 1)
             ):
                 rows[y] = bytearray(rows[y])
                 rows[y][x * 4:x * 4 + 4] = b"\x11\x11\x14\xff"
                 rows[y] = bytes(rows[y])
+    if abs(scale - 1.0) > 0.05:
+        rows = _scale_rgba(rows, scale)
     write_png(path, rows)
+
+
+def _scale_rgba(rows: list[bytes], scale: float) -> list[bytes]:
+    src_h = len(rows)
+    src_w = len(rows[0]) // 4
+    dst_w = max(int(src_w * scale), 1)
+    dst_h = max(int(src_h * scale), 1)
+    out = []
+    for y in range(dst_h):
+        sy = min(int(y / scale), src_h - 1)
+        src = rows[sy]
+        row = bytearray(dst_w * 4)
+        for x in range(dst_w):
+            sx = min(int(x / scale), src_w - 1)
+            row[x * 4:x * 4 + 4] = src[sx * 4:sx * 4 + 4]
+        out.append(bytes(row))
+    return out
 
 
 def thumbs(media: Path, directory: Path, count: int = 8) -> list[str]:

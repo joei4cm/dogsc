@@ -109,7 +109,7 @@ open ".build/local/DogSC Dev.app"
 
 ## Linux（Ubuntu / Omarchy）
 
-macOS 版依赖 ScreenCaptureKit、AppKit 和 AVFoundation，不能在 Linux 上编译。Ubuntu 和 Omarchy 使用仓库里的 Linux 版：录制、分割、裁剪、按点击运镜，以及带留白、圆角和背景的 MP4 导出。
+macOS 版依赖 ScreenCaptureKit、AppKit 和 AVFoundation，不能在 Linux 上直接编译。Ubuntu 和 Omarchy 使用仓库里的 Linux 版，对齐 macOS 的主要剪辑能力：多轨时间线、画面/开场/运镜/光标/摄像头/声音检查器、样机框、网格与动效背景、缩放与屏幕 3D、马赛克、贴图，以及带阴影的 MP4 导出。
 
 它按当前桌面选择捕获方式：
 
@@ -134,7 +134,14 @@ Omarchy 可以把标记绑到 `Ctrl+Alt+M`：
 bind = CTRL ALT, M, exec, dogsc mark
 ```
 
-`linux/bin/dogsc install` 会在当前用户的应用菜单里加入 DogSC。Linux 项目保存在 `~/.local/share/dogsc/`，格式与 macOS 项目不同，不能互换打开。3D 倾斜、摄像头叠层和 iPhone 采集仍只在 macOS 版提供。
+`linux/bin/dogsc install` 会在当前用户的应用菜单里加入 DogSC。Linux 项目保存在 `~/.local/share/dogsc/`，格式与 macOS `.dogscproject` 不同，不能互换打开。
+
+仍接近但不完全等同 macOS 的部分：
+
+- iPhone / Continuity Camera 有线采集仍依赖 macOS
+- 摄像头画中画可在界面里布置；实况叠录取决于本机 v4l2 / 导入的摄像头素材
+- 导出里的屏幕 3D 是稳定的平面旋转近似，预览使用 CSS 透视
+- Sparkle 自动更新、ProRes 母带录制策略按平台分别处理
 
 ## 许可
 

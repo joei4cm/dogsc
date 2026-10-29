@@ -13,8 +13,28 @@ import webbrowser
 from dogsc.errors import DogSCError
 from dogsc.export_plan import build_export
 from dogsc.media import probe
+from dogsc.model import (
+    ASPECTS,
+    BACKGROUND_KINDS,
+    CAMERA_SHAPES,
+    CLICK_EFFECTS,
+    CURSOR_ASSETS,
+    CURSOR_MOTION,
+    DYNAMIC_PRESETS,
+    FRAME_STYLES,
+    MOSAIC_STYLES,
+    OPENING_CURVES,
+    OPENING_PRESETS,
+    PATTERN_PRESETS,
+    RESOLUTIONS,
+    blank_mosaic,
+    blank_screen_motion,
+    blank_sticker,
+    migrate,
+)
 from dogsc.platform import detect
 from dogsc.project import (
+    assets_dir,
     delete,
     import_media,
     list_projects,
@@ -22,15 +42,19 @@ from dogsc.project import (
     load_pointer,
     media_path,
     project_dir,
+    push_history,
+    redo,
     save,
+    undo,
 )
 from dogsc.recorder import Recorder, pick_region_for
 from dogsc.sources import list_hypr_monitors, list_hypr_windows, list_x11_windows, list_xrandr
-from dogsc.timeline import add_manual_zoom, delete_clip, move_clip, set_speed, split_clip, trim_clip
+from dogsc.timeline import add_manual_zoom, clip_at, delete_clip, move_clip, set_speed, split_clip, trim_clip
 from dogsc.zoom import new_id, plan_auto_zooms
 
 
 WEB = Path(__file__).resolve().parent / "web"
+FONTS = Path(__file__).resolve().parents[2] / "Resources" / "Fonts"
 
 
 class App:
@@ -71,6 +95,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._project_get(path)
             if path == "/" or path == "":
                 return self._file(WEB / "index.html", "text/html; charset=utf-8")
+            if path.startswith("/fonts/"):
+                target = (FONTS / path.split("/fonts/", 1)[1]).resolve()
+                if FONTS.resolve() not in target.parents and target != FONTS.resolve():
+                    return self._error(404, "没有这个字体。")
+                if target.is_file():
+                    return self._file(target, "font/otf")
+                return self._error(404, "没有这个字体。")
             target = (WEB / path.lstrip("/")).resolve()
             if WEB.resolve() not in target.parents and target != WEB.resolve():
                 return self._error(404, "没有这个页面。")
@@ -116,9 +147,19 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) == 3 and parts[:2] == ["api", "projects"]:
                 delete(parts[2])
                 return self._json({"ok": True})
-            if len(parts) == 5 and parts[:2] == ["api", "projects"] and parts[3] == "zooms":
-                project = load(parts[2])
-                project["zooms"] = [zoom for zoom in project["zooms"] if zoom["id"] != parts[4]]
+            if len(parts) == 5 and parts[:2] == ["api", "projects"]:
+                project = migrate(load(parts[2]))
+                push_history(project)
+                key = {
+                    "zooms": "zooms",
+                    "screen-motions": "screen_motions",
+                    "mosaics": "mosaics",
+                    "stickers": "stickers",
+                    "markers": "markers",
+                }.get(parts[3])
+                if not key:
+                    return self._error(404, "没有这个接口。")
+                project[key] = [item for item in project.get(key) or [] if item.get("id") != parts[4]]
                 save(project)
                 return self._json(project)
             return self._error(404, "没有这个接口。")
@@ -132,7 +173,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(404, "没有这个项目。")
         project_id = parts[2]
         if len(parts) == 3:
-            return self._json(load(project_id))
+            return self._json(migrate(load(project_id)))
         tail = "/".join(parts[3:])
         if tail == "pointer":
             return self._json({"events": load_pointer(project_id)})
@@ -144,6 +185,12 @@ class Handler(BaseHTTPRequestHandler):
             if not target.is_file():
                 return self._error(404, "没有这张缩略图。")
             return self._file(target, "image/jpeg")
+        if tail.startswith("assets/"):
+            name = Path(tail.split("/", 1)[1]).name
+            target = assets_dir(project_id) / name
+            if not target.is_file():
+                return self._error(404, "没有这个素材。")
+            return self._file(target, mimetypes.guess_type(target.name)[0] or "application/octet-stream")
         if tail == "export/status":
             return self._json(APP.exports.get(project_id) or {"state": "idle"})
         if tail == "export/file":
@@ -158,10 +205,19 @@ class Handler(BaseHTTPRequestHandler):
         parts = [part for part in path.split("/") if part]
         project_id = parts[2]
         action = parts[3] if len(parts) > 3 else ""
-        project = load(project_id)
+        project = migrate(load(project_id))
+        if action == "sticker-upload":
+            return self._json(self._sticker_upload(project))
         body = self._body()
+        mutating = action not in {"export"}
+        if mutating and action not in {"undo", "redo"}:
+            push_history(project)
         if action == "meta":
             _apply_meta(project, body)
+        elif action == "undo":
+            project = undo(project)
+        elif action == "redo":
+            project = redo(project)
         elif action == "split":
             project["clips"], project["zooms"], project["markers"] = split_clip(
                 project["clips"], project["zooms"], project["markers"], float(body["time"])
@@ -187,6 +243,10 @@ class Handler(BaseHTTPRequestHandler):
                 float(body.get("focus_x", 0.5)), float(body.get("focus_y", 0.5)),
                 float(body.get("scale", 1.6)), str(body.get("easing") or "cubic"),
             )
+            if "enter" in body:
+                zoom["enter"] = min(max(float(body["enter"]), 0), 3)
+            if "exit" in body:
+                zoom["exit"] = min(max(float(body["exit"]), 0), 3)
             project["zooms"].append(zoom)
         elif action == "zoom-auto":
             project["zooms"] = [
@@ -194,8 +254,19 @@ class Handler(BaseHTTPRequestHandler):
             ] + plan_auto_zooms(project["clips"], load_pointer(project_id))
         elif action == "zoom-update":
             _update_zoom(project, body)
+        elif action == "screen-motion":
+            project["screen_motions"].append(_make_screen_motion(project, body))
+        elif action == "screen-motion-update":
+            _update_item(project["screen_motions"], body, _screen_motion_fields)
+        elif action == "mosaic":
+            project["mosaics"].append(_make_mosaic(project, body))
+        elif action == "mosaic-update":
+            _update_item(project["mosaics"], body, _mosaic_fields)
+        elif action == "sticker":
+            project["stickers"].append(_make_sticker(project, body))
+        elif action == "sticker-update":
+            _update_item(project["stickers"], body, _sticker_fields)
         elif action == "marker":
-            from dogsc.timeline import clip_at
             found = clip_at(project["clips"], float(body["time"]))
             if found is None:
                 raise DogSCError("播放头不在片段上。")
@@ -212,6 +283,25 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(404, "没有这个操作。")
         save(project)
         return self._json(project)
+
+    def _sticker_upload(self, project: dict) -> dict:
+        content_type = self.headers.get("Content-Type", "")
+        if not content_type.startswith("multipart/form-data"):
+            raise DogSCError("请用 multipart 上传贴图。")
+        filename, data = _read_upload(self._raw(), content_type)
+        suffix = Path(filename).suffix.lower() or ".png"
+        if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+            raise DogSCError("贴图只支持图片文件。")
+        push_history(project)
+        name = f"{new_id()}{suffix}"
+        target = assets_dir(project["id"]) / name
+        target.write_bytes(data)
+        relative = f"assets/{name}"
+        item = _make_sticker(project, {"time": 0, "path": relative})
+        # Prefer current playhead if the client sent it as a query later; default start near zero.
+        project["stickers"].append(item)
+        save(project)
+        return project
 
     def _import(self) -> None:
         content_type = self.headers.get("Content-Type", "")
@@ -348,23 +438,20 @@ def _apply_meta(project: dict, body: dict) -> None:
             raise DogSCError("项目名不能为空。")
         project["name"] = name[:80]
     if "canvas" in body:
-        canvas = dict(project.get("canvas") or {})
-        incoming = body["canvas"]
-        aspect = str(incoming.get("aspect") or canvas.get("aspect"))
-        if aspect not in {"source", "16:9", "4:3", "1:1", "9:16", "3:4"}:
-            raise DogSCError("不支持的画面比例。")
-        canvas["aspect"] = aspect
-        canvas["padding"] = min(max(float(incoming.get("padding", canvas.get("padding", 0))), 0), 0.2)
-        canvas["radius"] = min(max(float(incoming.get("radius", canvas.get("radius", 0))), 0), 160)
-        canvas["shadow"] = min(max(float(incoming.get("shadow", canvas.get("shadow", 0))), 0), 1)
-        background = str(incoming.get("background", canvas.get("background", "#16161a")))
-        if len(background) == 7 and background.startswith("#"):
-            canvas["background"] = background
-        project["canvas"] = canvas
+        project["canvas"] = _merge_canvas(project.get("canvas") or {}, body["canvas"])
+    if "cursor" in body:
+        project["cursor"] = _merge_cursor(project.get("cursor") or {}, body["cursor"])
+        project["draw_cursor"] = project["cursor"].get("asset") != "system.hidden"
+    if "audio" in body:
+        project["audio"] = _merge_audio(project.get("audio") or {}, body["audio"])
+    if "camera" in body:
+        project["camera"] = _merge_camera(project.get("camera") or {}, body["camera"])
+    if "opening" in body:
+        project["opening"] = _merge_opening(project.get("opening") or {}, body["opening"])
     if "export" in body:
         export = dict(project.get("export") or {})
         resolution = str(body["export"].get("resolution") or export.get("resolution") or "1080p")
-        if resolution not in {"source", "1080p", "1440p", "4k"}:
+        if resolution not in RESOLUTIONS:
             raise DogSCError("不支持的导出分辨率。")
         fps = int(body["export"].get("fps") or export.get("fps") or 30)
         if fps not in {30, 60}:
@@ -374,8 +461,162 @@ def _apply_meta(project: dict, body: dict) -> None:
         project["export"] = export
     if "draw_cursor" in body:
         project["draw_cursor"] = bool(body["draw_cursor"])
+        if not project["draw_cursor"]:
+            project.setdefault("cursor", {})["asset"] = "system.hidden"
     if "zoom" in body:
         _update_zoom(project, body["zoom"])
+
+
+def _merge_canvas(canvas: dict, incoming: dict) -> dict:
+    canvas = dict(canvas)
+    if "aspect" in incoming:
+        aspect = str(incoming["aspect"])
+        if aspect not in ASPECTS:
+            raise DogSCError("不支持的画面比例。")
+        canvas["aspect"] = aspect
+    for key, low, high in (
+        ("padding", 0, 0.3),
+        ("radius", 0, 160),
+        ("shadow", 0, 1),
+        ("border", 0, 40),
+        ("border_opacity", 0, 1),
+        ("pattern_scale", 0.5, 5),
+        ("pattern_opacity", 0.05, 1),
+        ("background_blur", 0, 80),
+        ("content_scale", 0.25, 4),
+        ("content_x", 0, 1),
+        ("content_y", 0, 1),
+        ("frame_scale", 0.6, 1.6),
+        ("toolbar_scale", 0.65, 1.6),
+    ):
+        if key in incoming:
+            canvas[key] = min(max(float(incoming[key]), low), high)
+    if "background" in incoming:
+        background = str(incoming["background"])
+        if len(background) == 7 and background.startswith("#"):
+            canvas["background"] = background
+    if "border_color" in incoming:
+        color = str(incoming["border_color"])
+        if len(color) == 7 and color.startswith("#"):
+            canvas["border_color"] = color
+    if "background_kind" in incoming:
+        kind = str(incoming["background_kind"])
+        if kind not in BACKGROUND_KINDS:
+            raise DogSCError("不支持的背景类型。")
+        canvas["background_kind"] = kind
+    if "pattern" in incoming:
+        pattern = str(incoming["pattern"])
+        if pattern not in PATTERN_PRESETS:
+            raise DogSCError("不支持的网格背景。")
+        canvas["pattern"] = pattern
+    if "dynamic" in incoming:
+        dynamic = str(incoming["dynamic"])
+        if dynamic not in DYNAMIC_PRESETS:
+            raise DogSCError("不支持的动效背景。")
+        canvas["dynamic"] = dynamic
+    if "screen_frame" in incoming:
+        style = str(incoming["screen_frame"])
+        if style not in FRAME_STYLES:
+            raise DogSCError("不支持的样机框。")
+        canvas["screen_frame"] = style
+    if "frame_title" in incoming:
+        canvas["frame_title"] = str(incoming["frame_title"])[:40]
+    if "frame_address" in incoming:
+        canvas["frame_address"] = str(incoming["frame_address"])[:80]
+    return canvas
+
+
+def _merge_cursor(cursor: dict, incoming: dict) -> dict:
+    cursor = dict(cursor)
+    if "asset" in incoming:
+        asset = str(incoming["asset"])
+        if asset not in CURSOR_ASSETS:
+            raise DogSCError("不支持的光标样式。")
+        cursor["asset"] = asset
+    if "size" in incoming:
+        cursor["size"] = min(max(float(incoming["size"]), 0.25), 6)
+    if "hide_when_idle" in incoming:
+        cursor["hide_when_idle"] = bool(incoming["hide_when_idle"])
+    if "idle_delay" in incoming:
+        cursor["idle_delay"] = min(max(float(incoming["idle_delay"]), 0.2), 8)
+    if "click_effect" in incoming:
+        effect = str(incoming["click_effect"])
+        if effect not in CLICK_EFFECTS:
+            raise DogSCError("不支持的点击反馈。")
+        cursor["click_effect"] = effect
+    if "click_opacity" in incoming:
+        cursor["click_opacity"] = min(max(float(incoming["click_opacity"]), 0), 1)
+    if "click_scale" in incoming:
+        cursor["click_scale"] = min(max(float(incoming["click_scale"]), 0.5), 3)
+    if "motion" in incoming:
+        motion = str(incoming["motion"])
+        if motion not in CURSOR_MOTION:
+            raise DogSCError("不支持的光标手感。")
+        cursor["motion"] = motion
+    if "tilt" in incoming:
+        cursor["tilt"] = min(max(float(incoming["tilt"]), 2), 4)
+    if "time_offset" in incoming:
+        cursor["time_offset"] = min(max(float(incoming["time_offset"]), -2), 2)
+    return cursor
+
+
+def _merge_audio(audio: dict, incoming: dict) -> dict:
+    audio = dict(audio)
+    for key in ("system_volume", "mic_volume"):
+        if key in incoming:
+            audio[key] = min(max(float(incoming[key]), 0), 2)
+    for key in ("system_muted", "mic_muted"):
+        if key in incoming:
+            audio[key] = bool(incoming[key])
+    return audio
+
+
+def _merge_camera(camera: dict, incoming: dict) -> dict:
+    camera = dict(camera)
+    if "enabled" in incoming:
+        camera["enabled"] = bool(incoming["enabled"])
+    if "shape" in incoming:
+        shape = str(incoming["shape"])
+        if shape not in CAMERA_SHAPES:
+            raise DogSCError("不支持的摄像头形状。")
+        camera["shape"] = shape
+    for key, low, high in (
+        ("x", 0, 1), ("y", 0, 1), ("size", 0.08, 0.6), ("roundness", 0, 1),
+        ("border", 0, 20), ("shadow", 0, 1), ("opacity", 0, 1),
+    ):
+        if key in incoming:
+            camera[key] = min(max(float(incoming[key]), low), high)
+    if "mirror" in incoming:
+        camera["mirror"] = bool(incoming["mirror"])
+    if "border_color" in incoming:
+        color = str(incoming["border_color"])
+        if len(color) == 7 and color.startswith("#"):
+            camera["border_color"] = color
+    return camera
+
+
+def _merge_opening(opening: dict, incoming: dict) -> dict:
+    opening = dict(opening)
+    if "enabled" in incoming:
+        opening["enabled"] = bool(incoming["enabled"])
+    if "preset" in incoming:
+        preset = str(incoming["preset"])
+        if preset not in OPENING_PRESETS:
+            raise DogSCError("不支持的开场方式。")
+        opening["preset"] = preset
+    if "curve" in incoming:
+        curve = str(incoming["curve"])
+        if curve not in OPENING_CURVES:
+            raise DogSCError("不支持的开场节奏。")
+        opening["curve"] = curve
+    if "duration" in incoming:
+        opening["duration"] = min(max(float(incoming["duration"]), 0.4), 8)
+    if "stagger" in incoming:
+        opening["stagger"] = min(max(float(incoming["stagger"]), 0), 1.5)
+    for key in ("include_screen", "include_camera", "include_stickers"):
+        if key in incoming:
+            opening[key] = bool(incoming[key])
+    return opening
 
 
 def _update_zoom(project: dict, body: dict) -> None:
@@ -384,19 +625,107 @@ def _update_zoom(project: dict, body: dict) -> None:
         if zoom["id"] != zoom_id:
             continue
         if "scale" in body:
-            zoom["scale"] = min(max(float(body["scale"]), 1), 4)
+            zoom["scale"] = min(max(float(body["scale"]), 1), 6)
         if "focus_x" in body:
             zoom["focus_x"] = min(max(float(body["focus_x"]), 0), 1)
         if "focus_y" in body:
             zoom["focus_y"] = min(max(float(body["focus_y"]), 0), 1)
         if "easing" in body and body["easing"] in {"linear", "quadratic", "cubic", "quintic", "spring"}:
             zoom["easing"] = body["easing"]
+        if "enter" in body:
+            zoom["enter"] = min(max(float(body["enter"]), 0), 3)
+        if "exit" in body:
+            zoom["exit"] = min(max(float(body["exit"]), 0), 3)
         if "start" in body:
             zoom["start"] = max(float(body["start"]), 0)
         if "end" in body:
             zoom["end"] = max(float(body["end"]), float(zoom["start"]))
         return
     raise DogSCError("找不到这段运镜。")
+
+
+def _locate_clip(project: dict, time: float):
+    found = clip_at(project["clips"], time)
+    if found is None:
+        raise DogSCError("播放头不在片段上。")
+    return found
+
+
+def _make_screen_motion(project: dict, body: dict) -> dict:
+    clip, local, _offset = _locate_clip(project, float(body.get("time") or 0))
+    item = blank_screen_motion(max(local - 0.2, 0), min(local + 1.2, float(clip["src_out"] - clip["src_in"]) / max(float(clip.get("speed") or 1), 0.05)))
+    item["clip_id"] = clip["id"]
+    for key in ("rotation_x", "rotation_y", "rotation_z", "perspective", "scale", "position_x", "position_y", "enter", "exit"):
+        if key in body:
+            item[key] = float(body[key])
+    if "easing" in body:
+        item["easing"] = str(body["easing"])
+    return item
+
+
+def _make_mosaic(project: dict, body: dict) -> dict:
+    clip, local, _offset = _locate_clip(project, float(body.get("time") or 0))
+    item = blank_mosaic(max(local - 0.1, 0), min(local + 1.5, 60))
+    item["clip_id"] = clip["id"]
+    for key in ("x", "y", "width", "height", "corner_radius", "intensity", "dimming", "start", "end"):
+        if key in body:
+            item[key] = float(body[key])
+    if "style" in body and str(body["style"]) in MOSAIC_STYLES:
+        item["style"] = str(body["style"])
+    return item
+
+
+def _make_sticker(project: dict, body: dict) -> dict:
+    clip, local, _offset = _locate_clip(project, float(body.get("time") or 0))
+    path = str(body.get("path") or "")
+    if not path or ".." in path:
+        raise DogSCError("贴图路径不正确。")
+    item = blank_sticker(max(local - 0.1, 0), min(local + 2.0, 60), path)
+    item["clip_id"] = clip["id"]
+    for key in ("x", "y", "width", "rotation", "opacity", "corner_radius", "start", "end"):
+        if key in body:
+            item[key] = float(body[key])
+    if "animation" in body:
+        item["animation"] = str(body["animation"])
+    return item
+
+
+def _screen_motion_fields(item: dict, body: dict) -> None:
+    for key in ("rotation_x", "rotation_y", "rotation_z", "perspective", "scale", "position_x", "position_y", "enter", "exit", "start", "end"):
+        if key in body:
+            item[key] = float(body[key])
+    if "easing" in body:
+        item["easing"] = str(body["easing"])
+
+
+def _mosaic_fields(item: dict, body: dict) -> None:
+    for key in ("x", "y", "width", "height", "corner_radius", "intensity", "dimming", "start", "end"):
+        if key in body:
+            item[key] = float(body[key])
+    if "style" in body and str(body["style"]) in MOSAIC_STYLES:
+        item["style"] = str(body["style"])
+
+
+def _sticker_fields(item: dict, body: dict) -> None:
+    for key in ("x", "y", "width", "rotation", "opacity", "corner_radius", "start", "end"):
+        if key in body:
+            item[key] = float(body[key])
+    if "animation" in body:
+        item["animation"] = str(body["animation"])
+
+
+def _update_item(items: list[dict], body: dict, apply) -> None:
+    item_id = str(body.get("id") or "")
+    for item in items:
+        if item.get("id") != item_id:
+            continue
+        apply(item, body)
+        return
+    raise DogSCError("找不到这段效果。")
+
+
+def _upload_sticker(project: dict, body: dict) -> dict:
+    raise DogSCError("请用 multipart 上传贴图。")
 
 
 def _ffmpeg_failure(completed: subprocess.CompletedProcess[str]) -> str:
