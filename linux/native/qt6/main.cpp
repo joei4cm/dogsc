@@ -1,3 +1,4 @@
+#include <QCoreApplication>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QUrl>
