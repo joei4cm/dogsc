@@ -453,9 +453,9 @@ function homeHtml() {
         <button class="btn icon danger" data-delete="${project.id}" title="${t("delete")}">${ICONS.trash}</button>
       </div>
     </div>`).join("");
-  return `<div class="home-shell">
+  return `<div class="home-shell" data-enter="1">
     <header class="topbar">
-      <div class="brand"><span class="logo"></span><div><strong>DogSC</strong><em id="platform-pill">Linux</em></div></div>
+      <div class="brand"><span class="logo" aria-hidden="true"></span><div><strong>DogSC</strong><em id="platform-pill">Linux</em></div></div>
       <div class="top-center"></div>
       <div class="top-actions">
         <button class="btn ghost" id="lang">${t("lang")}</button>
@@ -466,7 +466,7 @@ function homeHtml() {
         <h1>DogSC</h1>
         <p>${t("lead")}</p>
         <div class="home-actions">
-          <button class="btn" id="go-demo">${t("demo")}</button>
+          <button class="btn primary" id="go-demo">${t("demo")}</button>
           <label class="btn">${t("import")}<input id="file" type="file" accept="video/*" hidden></label>
         </div>
       </div>
@@ -816,11 +816,12 @@ function bindHome() {
     render();
   });
   document.querySelectorAll("#go-demo").forEach((node) => node.addEventListener("click", async (event) => {
-    event.currentTarget.disabled = true;
+    const button = event.currentTarget;
+    button.disabled = true;
+    DogSCMotion.press(button);
     toast(state.lang === "zh" ? "正在生成示例…" : "Creating the example…");
     try { await openProject((await api("/api/demo", { method: "POST" })).id); }
-    catch (error) { toast(error.message); }
-    finally { event.currentTarget.disabled = false; }
+    catch (error) { toast(error.message); if (button.isConnected) button.disabled = false; }
   }));
   document.querySelectorAll("#file").forEach((file) => {
     file.onchange = async () => {
@@ -879,7 +880,10 @@ function bindHome() {
       render();
     } catch (error) { toast(error.message); }
   });
-  document.querySelector("#start-record")?.addEventListener("click", startRecording);
+  document.querySelector("#start-record")?.addEventListener("click", (event) => {
+    DogSCMotion.press(event.currentTarget);
+    startRecording();
+  });
   document.querySelector("#stop-record")?.addEventListener("click", stopRecording);
   document.querySelector("#add-marker")?.addEventListener("click", () => api("/api/record/marker", { method: "POST", body: {} }).catch((error) => toast(error.message)));
   document.addEventListener("pointerdown", dismissRecorderPopover, { once: true });
@@ -1529,7 +1533,10 @@ function togglePlay() {
 
 async function exportProject() {
   const button = document.querySelector("#export");
-  button.disabled = true;
+  if (button) {
+    button.disabled = true;
+    DogSCMotion.press(button);
+  }
   try {
     await api(`/api/projects/${state.project.id}/export`, { method: "POST", body: {} });
     for (let attempt = 0; attempt < 600; attempt += 1) {
@@ -1549,7 +1556,7 @@ async function exportProject() {
     }
     throw new Error(state.lang === "zh" ? "导出时间太长，请稍后再看状态。" : "Export is still running.");
   } catch (error) { toast(error.message); }
-  finally { button.disabled = false; }
+  finally { if (button?.isConnected) button.disabled = false; }
 }
 
 function aspectRatio(aspect, width, height) {
