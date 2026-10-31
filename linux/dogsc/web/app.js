@@ -16,10 +16,56 @@ const state = {
   frameTab: "background",
   bgTab: "wallpaper",
   motionMode: "zoom",
-  record: { source: "display", display: 0, window: null, geometry: null, fps: 30, mic: false, system: false },
+  motionDrive: "auto",
+  record: { source: "display", display: 0, window: null, geometry: null, fps: 30, mic: false, system: false, camera: false },
   sources: { displays: [], windows: [] },
   recording: { active: false, elapsed: 0 },
+  recorderPopover: null,
+  hudMenu: null,
+  cropping: false,
+  timelineMode: "picture",
+  magnetic: true,
+  hoverPreview: true,
+  timelineZoom: 1,
   dirty: false,
+};
+
+const ICONS = {
+  display: `<svg class="icon-svg" viewBox="0 0 18 18"><rect x="1.5" y="2.5" width="15" height="10" rx="2.4"/><path d="M6 15.6h6"/></svg>`,
+  window: `<svg class="icon-svg" viewBox="0 0 18 18"><rect x="1.5" y="3" width="15" height="12" rx="2.6"/><path d="M4.6 6.2h2.8"/></svg>`,
+  region: `<svg class="icon-svg" viewBox="0 0 18 18"><path d="M3 6V4.5A1.5 1.5 0 0 1 4.5 3H6M12 3h1.5A1.5 1.5 0 0 1 15 4.5V6M15 12v1.5a1.5 1.5 0 0 1-1.5 1.5H12M6 15H4.5A1.5 1.5 0 0 1 3 13.5V12"/></svg>`,
+  mic: `<svg class="icon-svg" viewBox="0 0 18 18"><rect x="6.5" y="2.5" width="5" height="9" rx="2.5"/><path d="M4.5 9a4.5 4.5 0 0 0 9 0M9 13.5V16"/></svg>`,
+  micOff: `<svg class="icon-svg" viewBox="0 0 18 18"><rect x="6.5" y="2.5" width="5" height="9" rx="2.5"/><path d="M4.5 9a4.5 4.5 0 0 0 9 0M9 13.5V16M3.5 3.5l11 11"/></svg>`,
+  cam: `<svg class="icon-svg" viewBox="0 0 18 18"><rect x="2" y="5" width="10" height="8" rx="1.8"/><path d="M12.5 8l3.5-2v6l-3.5-2z"/></svg>`,
+  camOff: `<svg class="icon-svg" viewBox="0 0 18 18"><rect x="2" y="5" width="10" height="8" rx="1.8"/><path d="M12.5 8l3.5-2v6l-3.5-2zM3.5 3.5l11 11"/></svg>`,
+  speaker: `<svg class="icon-svg" viewBox="0 0 18 18"><path d="M3.5 7.2h2.2L9.5 4.5v9L5.7 10.8H3.5z"/><path d="M12 7.2a2.6 2.6 0 0 1 0 3.6M13.8 5.4a5 5 0 0 1 0 7.2"/></svg>`,
+  speakerOff: `<svg class="icon-svg" viewBox="0 0 18 18"><path d="M3.5 7.2h2.2L9.5 4.5v9L5.7 10.8H3.5zM12 6.5l3.5 5M15.5 6.5l-3.5 5"/></svg>`,
+  more: `<svg class="icon-svg" viewBox="0 0 18 18" style="fill:currentColor;stroke:none"><circle cx="4.5" cy="9" r="1.35"/><circle cx="9" cy="9" r="1.35"/><circle cx="13.5" cy="9" r="1.35"/></svg>`,
+  frame: `<svg class="icon-svg" viewBox="0 0 18 18"><rect x="2" y="4" width="11" height="9" rx="1.6"/><path d="M14.5 6.5l1.5-1v7l-1.5-1"/></svg>`,
+  opening: `<svg class="icon-svg" viewBox="0 0 18 18"><rect x="2.5" y="4" width="13" height="10" rx="2"/><path d="M6 8.5l2 2 4-4"/></svg>`,
+  motion: `<svg class="icon-svg" viewBox="0 0 18 18"><circle cx="9" cy="9" r="3.2"/><path d="M9 2.8v1.8M9 13.4v1.8M2.8 9h1.8M13.4 9h1.8M4.4 4.4l1.3 1.3M12.3 12.3l1.3 1.3M13.6 4.4l-1.3 1.3M5.7 12.3l-1.3 1.3"/></svg>`,
+  cursor: `<svg class="icon-svg" viewBox="0 0 18 18"><path d="M4 3.5l1.2 10 3-3.2 3.4 4.4 1.6-.9-3.5-4.5H14z"/></svg>`,
+  camera: `<svg class="icon-svg" viewBox="0 0 18 18"><rect x="2" y="5" width="10" height="8" rx="1.8"/><path d="M12.5 8l3.5-2v6l-3.5-2z"/></svg>`,
+  audio: `<svg class="icon-svg" viewBox="0 0 18 18"><path d="M3.5 7.2h2.2L9.5 4.5v9L5.7 10.8H3.5z"/><path d="M12 7.2a2.6 2.6 0 0 1 0 3.6M13.8 5.4a5 5 0 0 1 0 7.2"/></svg>`,
+  undo: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M5 7H3.2A6.2 6.2 0 1 1 3.5 12"/><path d="M5 4.2V7H2.2"/></svg>`,
+  redo: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M13 7h1.8A6.2 6.2 0 1 0 14.5 12"/><path d="M13 4.2V7h2.8"/></svg>`,
+  scissors: `<svg class="icon-svg sm" viewBox="0 0 18 18"><circle cx="5" cy="5" r="2"/><circle cx="5" cy="13" r="2"/><path d="M6.6 6.2L15 13M6.6 11.8L15 5"/></svg>`,
+  trash: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M4 5.5h10M7 5.5V4h4v1.5M6 5.5l.6 9h4.8l.6-9"/></svg>`,
+  restore: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M4.5 9a4.5 4.5 0 1 0 1.2-3"/><path d="M4.2 3.8V6.5H7"/></svg>`,
+  marker: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M9 2.8v12.4M6.2 5.2h5.6"/><path d="M5.5 15h7"/></svg>`,
+  film: `<svg class="icon-svg sm" viewBox="0 0 18 18"><rect x="3" y="4" width="12" height="10" rx="1.5"/><path d="M6 4v10M12 4v10M3 7.5h12M3 10.5h12"/></svg>`,
+  wave: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M2.5 9h1.5l1-3 1.5 6 1.5-8 1.5 8 1.5-5 1 2H15.5"/></svg>`,
+  magnet: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M4.5 3.5h3v6a1.5 1.5 0 0 0 3 0v-6h3v6a4.5 4.5 0 0 1-9 0z"/></svg>`,
+  eye: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M2.5 9s2.8-4.5 6.5-4.5S15.5 9 15.5 9s-2.8 4.5-6.5 4.5S2.5 9 2.5 9z"/><circle cx="9" cy="9" r="2"/></svg>`,
+  fit: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M3.5 6.5V3.5H6.5M11.5 3.5h3v3M14.5 11.5v3h-3M6.5 14.5h-3v-3"/></svg>`,
+  play: `<svg class="icon-svg sm fill" viewBox="0 0 18 18"><path d="M6.2 4.2l8 4.8-8 4.8z"/></svg>`,
+  pause: `<svg class="icon-svg sm fill" viewBox="0 0 18 18"><rect x="5" y="4" width="2.8" height="10" rx="0.6"/><rect x="10.2" y="4" width="2.8" height="10" rx="0.6"/></svg>`,
+  prev: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M11.5 4.5L6.5 9l5 4.5"/><path d="M5 4.5v9"/></svg>`,
+  next: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M6.5 4.5L11.5 9l-5 4.5"/><path d="M13 4.5v9"/></svg>`,
+  crop: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M5 2.5v10.5H15.5M13 15.5V5H2.5"/></svg>`,
+  plus: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M9 4v10M4 9h10"/></svg>`,
+  sliders: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M3 5.5h12M3 12.5h12"/><circle cx="7" cy="5.5" r="1.8"/><circle cx="11" cy="12.5" r="1.8"/></svg>`,
+  chevron: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M6 7l3 3 3-3M6 4.5l3-1.5 3 1.5"/></svg>`,
 };
 
 const STR = {
@@ -87,10 +133,23 @@ const STR = {
     addSticker: "上传贴图",
     playing: "播放",
     pause: "暂停",
-    note: "iPhone 有线采集仍依赖 macOS Continuity。摄像头画中画可在导入摄像头素材后使用；本机 v4l2 设备会出现在录制页。",
+    note: "iPhone 有线采集仍依赖 macOS Continuity。摄像头画中画可在导入摄像头素材后使用；本机 v4l2 设备会出现在录制胶囊。",
     noDisplay: "没有列出显示器。",
     noWindow: "没有列出窗口。",
     delete: "删除",
+    settings: "设置",
+    addToCanvas: "添加到画面",
+    previewOpts: "预览选项",
+    picture: "画面",
+    waveform: "波形",
+    magnetic: "磁性吸附",
+    hoverPrev: "悬浮预览",
+    fitAll: "全部显示",
+    restoreCuts: "恢复剪辑",
+    autoMotion: "自动运镜",
+    manualMotion: "手动操控",
+    pan2d: "平移 2D",
+    applyAll: "应用到全部画面",
   },
   en: {
     lang: "中文",
@@ -156,10 +215,23 @@ const STR = {
     addSticker: "Upload sticker",
     playing: "Play",
     pause: "Pause",
-    note: "Cable iPhone capture still needs macOS Continuity. Camera PiP works after importing camera media; local v4l2 devices appear on the record page.",
+    note: "Cable iPhone capture still needs macOS Continuity. Camera PiP works after importing camera media; local v4l2 devices appear on the recorder capsule.",
     noDisplay: "No displays listed.",
     noWindow: "No windows listed.",
     delete: "Delete",
+    settings: "Settings",
+    addToCanvas: "Add to canvas",
+    previewOpts: "Preview options",
+    picture: "Picture",
+    waveform: "Waveform",
+    magnetic: "Magnetic snap",
+    hoverPrev: "Hover preview",
+    fitAll: "Fit all",
+    restoreCuts: "Restore cuts",
+    autoMotion: "Auto motion",
+    manualMotion: "Manual",
+    pan2d: "2D pan",
+    applyAll: "Apply to all frames",
   },
 };
 
@@ -228,8 +300,7 @@ async function api(path, options = {}) {
 
 function render() {
   const app = document.querySelector("#app");
-  if (state.view === "home") app.innerHTML = homeHtml();
-  else if (state.view === "record") app.innerHTML = recordHtml();
+  if (state.view === "home" || state.view === "record") app.innerHTML = homeHtml();
   else app.innerHTML = editorHtml();
   bind();
   if (state.view === "editor") {
@@ -241,90 +312,191 @@ function render() {
   if (pill && state.env) pill.textContent = `${state.env.os_name?.split(" ")[0] || "Linux"} · ${state.env.backend_label || state.env.backend}`;
 }
 
-function shell(center, body) {
-  return `<div class="shell">
-    <header class="topbar">
-      <div class="brand"><span class="mark"></span><div><strong>DogSC</strong><em id="platform-pill">Linux</em></div></div>
-      <div class="top-center">${center}</div>
-      <div class="top-actions">
-        <button class="btn ghost" id="lang">${t("lang")}</button>
+function sourceLabel(kind) {
+  return t(kind === "region" ? "region" : kind);
+}
+
+function recorderCapsuleHtml() {
+  const source = state.record.source;
+  const live = state.recording.active;
+  if (live) {
+    return `<div class="recorder-dock">
+      <div class="recorder-capsule">
+        <div class="recording-timer" id="elapsed">${formatTime(state.recording.elapsed)}</div>
+        <button class="rec-toggle" id="add-marker" title="${t("marker")}">${ICONS.marker}</button>
+        <button class="record-go live" id="stop-record" title="${t("stop")}"><span class="dot"><i></i></span></button>
       </div>
-    </header>
-    ${body}
+    </div>`;
+  }
+  const pop = state.recorderPopover;
+  let popover = "";
+  if (pop === "source") {
+    const displays = (state.sources.displays || []).map((display, index) => `
+      <button class="choice ${index === state.record.display && source === "display" ? "active" : ""}" data-display="${index}">
+        ${escapeHtml(display.name || display.id || `Display ${index + 1}`)} · ${display.width || "?"}×${display.height || "?"}
+      </button>`).join("") || `<p class="note">${t("noDisplay")}</p>`;
+    const windows = (state.sources.windows || []).map((window) => `
+      <button class="choice ${window.id === state.record.window && source === "window" ? "active" : ""}" data-window="${escapeHtml(window.id)}">
+        ${escapeHtml(window.title)}
+      </button>`).join("") || `<p class="note">${t("noWindow")}</p>`;
+    popover = `<div class="recorder-popover island" id="rec-pop">
+      <div class="segmented" style="margin-bottom:10px">
+        ${["display", "window", "region"].map((kind) => `<button data-source="${kind}" class="${source === kind ? "active" : ""}">${t(kind)}</button>`).join("")}
+      </div>
+      <div class="choices">${source === "display" ? displays : source === "window" ? windows : `
+        <p class="note">${state.record.geometry ? `${state.record.geometry.width}×${state.record.geometry.height}` : ""}</p>
+        <button class="btn" id="pick-region">${t("pick")}</button>`}</div>
+    </div>`;
+  } else if (pop === "mic") {
+    popover = `<div class="recorder-popover island narrow" id="rec-pop">
+      <div class="section-title">${t("mic")}</div>
+      <label class="row"><input type="checkbox" id="mic" ${state.record.mic ? "checked" : ""} ${state.env?.microphone ? "" : "disabled"}> ${t("mic")}</label>
+      <p class="note">${state.env?.microphone ? "" : (state.lang === "zh" ? "当前环境未检测到麦克风。" : "No microphone detected.")}</p>
+    </div>`;
+  } else if (pop === "camera") {
+    popover = `<div class="recorder-popover island narrow" id="rec-pop">
+      <div class="section-title">${t("camera")}</div>
+      <label class="row"><input type="checkbox" id="rec-camera" ${state.record.camera ? "checked" : ""}> ${t("camera")}</label>
+      <p class="note">${t("note")}</p>
+    </div>`;
+  } else if (pop === "system") {
+    popover = `<div class="recorder-popover island narrow" id="rec-pop">
+      <div class="section-title">${t("system")}</div>
+      <label class="row"><input type="checkbox" id="system" ${state.record.system ? "checked" : ""} ${state.env?.system_audio ? "" : "disabled"}> ${t("system")}</label>
+    </div>`;
+  } else if (pop === "more") {
+    popover = `<div class="recorder-popover island narrow" id="rec-pop">
+      <div class="section-title">${t("settings")}</div>
+      <label class="field">${t("fps")}
+        <select id="fps"><option ${state.record.fps === 30 ? "selected" : ""}>30</option><option ${state.record.fps === 60 ? "selected" : ""}>60</option></select>
+      </label>
+      <div class="actions" style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn" id="go-demo">${t("demo")}</button>
+        <label class="btn">${t("import")}<input id="file" type="file" accept="video/*" hidden></label>
+        <button class="btn ghost" id="go-path">${t("path")}</button>
+      </div>
+    </div>`;
+  }
+  return `<div class="recorder-dock">
+    ${popover}
+    <div class="recorder-capsule" id="recorder-capsule">
+      <button class="mode-wheel" id="mode-wheel" title="${sourceLabel(source)}">
+        ${ICONS[source] || ICONS.display}<span>${sourceLabel(source)}</span><span class="chev">⇅</span>
+      </button>
+      <button class="rec-toggle ${state.record.mic ? "on" : ""}" data-pop="mic" title="${t("mic")}">${state.record.mic ? ICONS.mic : ICONS.micOff}</button>
+      <button class="rec-toggle ${state.record.camera ? "on" : ""}" data-pop="camera" title="${t("camera")}">${state.record.camera ? ICONS.cam : ICONS.camOff}</button>
+      <button class="rec-toggle ${state.record.system ? "on" : ""}" data-pop="system" title="${t("system")}">${state.record.system ? ICONS.speaker : ICONS.speakerOff}</button>
+      <button class="rec-toggle" data-pop="more" title="${t("settings")}">${ICONS.more}</button>
+      <button class="record-go" id="start-record" title="${t("start")}"><span class="dot"><i></i></span></button>
+    </div>
   </div>`;
 }
 
 function homeHtml() {
-  const hints = (state.env?.hints || []).map((hint) => `<li>${escapeHtml(hint)}</li>`).join("");
   const cards = state.projects.map((project) => `
     <div class="project">
       <div class="project-row">
-        <button data-open="${project.id}" style="text-align:left;flex:1">
+        <button data-open="${project.id}">
           <strong>${escapeHtml(project.name || "未命名")}</strong>
           <span>${formatTime(project.duration || 0)} · ${project.width || "?"}×${project.height || "?"}</span>
         </button>
-        <button class="btn ghost" data-delete="${project.id}">${t("delete")}</button>
+        <button class="btn icon danger" data-delete="${project.id}" title="${t("delete")}">${ICONS.trash}</button>
       </div>
     </div>`).join("");
-  return shell("", `<main class="home">
-    <section class="hero">
-      <div class="card">
-        <h1>${t("title")}</h1>
+  return `<div class="home-shell">
+    <header class="topbar">
+      <div class="brand"><span class="logo"></span><div><strong>DogSC</strong><em id="platform-pill">Linux</em></div></div>
+      <div class="top-center"></div>
+      <div class="top-actions">
+        <button class="btn ghost" id="lang">${t("lang")}</button>
+      </div>
+    </header>
+    <main class="home-stage">
+      <div class="home-copy">
+        <h1>DogSC</h1>
         <p>${t("lead")}</p>
-        <div class="actions">
-          <button class="btn primary" id="go-record">${t("record")}</button>
+        <div class="home-actions">
           <button class="btn" id="go-demo">${t("demo")}</button>
-          <label class="btn" style="display:inline-flex;align-items:center">${t("import")}<input id="file" type="file" accept="video/*" hidden></label>
-          <button class="btn ghost" id="go-path">${t("path")}</button>
+          <label class="btn">${t("import")}<input id="file" type="file" accept="video/*" hidden></label>
         </div>
       </div>
-      <div class="card">
-        <strong>${state.env ? escapeHtml(state.env.os_name) : ""}</strong>
-        <ul class="hints">${hints}</ul>
-        <p class="note">${t("note")}</p>
-      </div>
-    </section>
-    <h2>${t("projects")}</h2>
-    ${cards ? `<div class="projects">${cards}</div>` : `<p class="empty">${t("empty")}</p>`}
-  </main>`);
+      <aside class="projects-drawer island">
+        <h2>${t("projects")}</h2>
+        <div class="projects-list">${cards || `<p class="empty">${t("empty")}</p>`}</div>
+      </aside>
+    </main>
+    ${recorderCapsuleHtml()}
+  </div>`;
 }
 
-function recordHtml() {
-  if (state.recording.active) {
-    return shell("", `<main class="record"><div class="card">
-      <div class="timer" id="elapsed">${formatTime(state.recording.elapsed)}</div>
-      <div class="actions">
-        <button class="btn" id="add-marker">${t("marker")}</button>
-        <button class="btn primary" id="stop-record" style="background:var(--red)">${t("stop")}</button>
-      </div>
-    </div></main>`);
-  }
-  const source = state.record.source;
-  const displays = (state.sources.displays || []).map((display, index) => `
-    <button class="choice ${index === state.record.display ? "active" : ""}" data-display="${index}">
-      ${escapeHtml(display.name || display.id || `Display ${index + 1}`)} · ${display.width || "?"}×${display.height || "?"}
-    </button>`).join("") || `<p class="note">${t("noDisplay")}</p>`;
-  const windows = (state.sources.windows || []).map((window) => `
-    <button class="choice ${window.id === state.record.window ? "active" : ""}" data-window="${escapeHtml(window.id)}">
-      ${escapeHtml(window.title)}
-    </button>`).join("") || `<p class="note">${t("noWindow")}</p>`;
-  const list = source === "display" ? displays : source === "window" ? windows : `
-    <p class="note">${state.record.geometry ? `${state.record.geometry.width}×${state.record.geometry.height}` : ""}</p>
-    <button class="btn" id="pick-region">${t("pick")}</button>`;
-  return shell("", `<main class="record"><div class="card">
-    <div class="segmented">
-      ${["display", "window", "region"].map((kind) => `<button data-source="${kind}" class="${source === kind ? "active" : ""}">${t(kind)}</button>`).join("")}
+function inspectorTabsHtml() {
+  const tabs = [
+    ["frame", "画面", ICONS.frame],
+    ["opening", "开场", ICONS.opening],
+    ["motion", "运镜", ICONS.motion],
+    ["cursor", "光标", ICONS.cursor],
+    ["camera", "摄像头", ICONS.camera],
+    ["audio", "声音", ICONS.audio],
+  ];
+  return tabs.map(([id, zh]) => {
+    const label = state.lang === "zh" ? zh : t(id);
+    return `<button data-tab="${id}" class="${state.tab === id ? "active" : ""}" title="${label}">${ICONS[id]}<span>${label}</span></button>`;
+  }).join("");
+}
+
+function stageHudHtml(project) {
+  const aspectMenu = state.hudMenu === "aspect" ? `<div class="hud-menu island">
+    ${["source", "16:9", "4:3", "1:1", "9:16", "3:4", "2.39:1", "1:2.39"].map((value) =>
+      `<button data-aspect="${value}" class="${project.canvas.aspect === value ? "active" : ""}">${value}</button>`).join("")}
+  </div>` : "";
+  const addMenu = state.hudMenu === "add" ? `<div class="hud-menu island" style="left:auto;right:0">
+    <button id="add-mosaic">${t("addMosaic")}</button>
+    <label class="btn" style="width:100%;justify-content:flex-start;margin:0;border-radius:8px">${t("addSticker")}<input id="sticker-file" type="file" accept="image/*" hidden></label>
+  </div>` : "";
+  const previewMenu = state.hudMenu === "preview" ? `<div class="hud-menu island" style="left:auto;right:0">
+    <button class="active">${state.lang === "zh" ? "完整画质" : "Full quality"}</button>
+    <button>${state.lang === "zh" ? "流畅预览" : "Fast preview"}</button>
+  </div>` : "";
+  return `<div class="stage-hud" id="stage-hud">
+    <div style="position:relative">
+      <button class="hud-btn" id="aspect-btn">${project.canvas.aspect || "16:9"}</button>
+      ${aspectMenu}
     </div>
-    <div class="choices">${list}</div>
-    <div class="row">
-      <label><input type="checkbox" id="mic" ${state.record.mic ? "checked" : ""} ${state.env?.microphone ? "" : "disabled"}> ${t("mic")}</label>
-      <label><input type="checkbox" id="system" ${state.record.system ? "checked" : ""} ${state.env?.system_audio ? "" : "disabled"}> ${t("system")}</label>
-      <label>${t("fps")}
-        <select id="fps"><option ${state.record.fps === 30 ? "selected" : ""}>30</option><option ${state.record.fps === 60 ? "selected" : ""}>60</option></select>
-      </label>
+    <button class="hud-btn ${state.cropping ? "active" : ""}" id="crop-btn" title="裁切">${ICONS.crop}</button>
+    <div style="position:relative">
+      <button class="hud-btn" id="add-btn" title="${t("addToCanvas")}">${ICONS.plus}</button>
+      ${addMenu}
     </div>
-    <div class="actions"><button class="btn primary" id="start-record">${t("start")}</button><button class="btn ghost" id="cancel-record">${t("back")}</button></div>
-  </div></main>`);
+    <div style="position:relative">
+      <button class="hud-btn" id="preview-btn" title="${t("previewOpts")}">${ICONS.sliders}</button>
+      ${previewMenu}
+    </div>
+    <div class="hud-divider"></div>
+    <button class="hud-btn" id="step-back" title="上一帧">${ICONS.prev}</button>
+    <button class="play-btn ${state.playing ? "playing" : ""}" id="play" title="${state.playing ? t("pause") : t("playing")}">${state.playing ? ICONS.pause : ICONS.play}</button>
+    <button class="hud-btn" id="step-forward" title="下一帧">${ICONS.next}</button>
+    <span class="hud-time" id="clock">${formatTime(state.time)}<em>/ ${formatTime(Z.duration(project.clips))}</em></span>
+  </div>`;
+}
+
+function timelineBarHtml() {
+  return `<div class="timeline-bar">
+    <button class="tl-tool" id="split" title="${t("split")}">${ICONS.scissors}</button>
+    <button class="tl-tool" id="delete-selection" title="${t("delete")}">${ICONS.trash}</button>
+    <button class="tl-tool" id="restore-cuts" title="${t("restoreCuts")}">${ICONS.restore}</button>
+    <button class="tl-tool" id="add-edit-marker" title="${t("marker")}">${ICONS.marker}</button>
+    <div class="tl-group" style="margin-left:8px">
+      <button id="mode-picture" class="${state.timelineMode === "picture" ? "active" : ""}">${ICONS.film}${t("picture")}</button>
+      <button id="mode-wave" class="${state.timelineMode === "waveform" ? "active" : ""}">${ICONS.wave}${t("waveform")}</button>
+    </div>
+    <div class="spacer"></div>
+    <button class="tl-tool ${state.magnetic ? "active" : ""}" id="magnetic" title="${t("magnetic")}">${ICONS.magnet}</button>
+    <button class="tl-tool ${state.hoverPreview ? "active" : ""}" id="hover-preview" title="${t("hoverPrev")}">${ICONS.eye}</button>
+    <button class="tl-tool" id="fit-all" title="${t("fitAll")}">${ICONS.fit}</button>
+    <div class="tl-zoom">
+      <input id="timeline-zoom" type="range" min="1" max="6" step="0.1" value="${state.timelineZoom}">
+    </div>
+  </div>`;
 }
 
 function editorHtml() {
@@ -333,47 +505,31 @@ function editorHtml() {
     <button class="btn ghost" id="back">${t("back")}</button>
     <input class="title" id="project-name" value="${escapeHtml(project.name)}">
     <span class="saved">${t("saved")}</span>
-    <button class="btn icon" id="undo" title="${t("undo")}">↶</button>
-    <button class="btn icon" id="redo" title="${t("redo")}">↷</button>`;
+    <button class="btn icon" id="undo" title="${t("undo")}">${ICONS.undo}</button>
+    <button class="btn icon" id="redo" title="${t("redo")}">${ICONS.redo}</button>`;
   const actions = `
     <button class="btn ghost" id="lang">${t("lang")}</button>
     <button class="btn primary" id="export">${t("export")}</button>`;
   return `<div class="shell">
     <header class="topbar">
-      <div class="brand"><span class="mark"></span><div><strong>DogSC</strong><em id="platform-pill">Linux</em></div></div>
+      <div class="brand"><span class="logo"></span><div><strong>DogSC</strong><em id="platform-pill">Linux</em></div></div>
       <div class="top-center">${center}</div>
       <div class="top-actions">${actions}</div>
     </header>
     <section class="editor">
       <div class="workspace">
         <div class="stage">
+          <div class="stage-dots"></div>
           <div class="canvas-frame" id="canvas"></div>
-          <div class="transport-float">
-            <select id="aspect">${options(["source", "16:9", "4:3", "1:1", "9:16", "3:4", "2.39:1", "1:2.39"], project.canvas.aspect)}</select>
-            <button class="btn icon" id="step-back">‹</button>
-            <button class="btn primary" id="play">${state.playing ? t("pause") : t("playing")}</button>
-            <button class="btn icon" id="step-forward">›</button>
-            <span class="time" id="clock">${formatTime(state.time)} | ${formatTime(Z.duration(project.clips))}</span>
-          </div>
+          ${stageHudHtml(project)}
         </div>
         <aside class="inspector">
-          <div class="inspector-rail">
-            ${[["frame","画面"],["opening","开场"],["motion","运镜"],["cursor","光标"],["camera","摄像头"],["audio","声音"]].map(([id, label]) => `
-              <button data-tab="${id}" class="${state.tab === id ? "active" : ""}">${state.lang === "zh" ? label : t(id)}</button>`).join("")}
-          </div>
+          <div class="inspector-rail">${inspectorTabsHtml()}</div>
           <div class="inspector-body">${inspectorBody()}</div>
         </aside>
       </div>
       <div class="timeline">
-        <div class="timeline-bar">
-          <button class="btn" id="split">${t("split")}</button>
-          <button class="btn" id="add-zoom">${t("zoom")}</button>
-          <button class="btn" id="auto-zoom">${t("auto")}</button>
-          <button class="btn" id="add-tilt">${t("addTilt")}</button>
-          <button class="btn" id="add-mosaic">${t("addMosaic")}</button>
-          <label class="btn">${t("addSticker")}<input id="sticker-file" type="file" accept="image/*" hidden></label>
-          <button class="btn ghost" id="add-edit-marker">${t("marker")}</button>
-        </div>
+        ${timelineBarHtml()}
         <div class="lanes" id="lanes"></div>
       </div>
     </section>
@@ -392,17 +548,13 @@ function inspectorBody() {
 function frameInspector() {
   const canvas = state.project.canvas;
   return `
+    <h2>${t("frame")}</h2>
     <div class="segmented" style="margin-bottom:14px">
       ${["background","layout","mockup"].map((id) => `<button data-frame-tab="${id}" class="${state.frameTab === id ? "active" : ""}">${t(id)}</button>`).join("")}
     </div>
     ${state.frameTab === "background" ? backgroundPanel(canvas) : ""}
     ${state.frameTab === "layout" ? layoutPanel(canvas) : ""}
-    ${state.frameTab === "mockup" ? mockupPanel(canvas) : ""}
-    <div class="section">
-      <div class="section-title">${t("export")}</div>
-      <label class="field">${t("resolution")}<select id="resolution">${options(["source", "1080p", "1440p", "4k"], state.project.export.resolution)}</select></label>
-      <label class="field">${t("fps")}<select id="export-fps">${options(["30", "60"], String(state.project.export.fps))}</select></label>
-    </div>`;
+    ${state.frameTab === "mockup" ? mockupPanel(canvas) : ""}`;
 }
 
 function backgroundPanel(canvas) {
@@ -454,6 +606,7 @@ function mockupPanel(canvas) {
 function openingInspector() {
   const opening = state.project.opening || {};
   return `
+    <h2>${t("opening")}</h2>
     <label class="row"><input id="opening-enabled" type="checkbox" ${opening.enabled ? "checked" : ""}> 启用开场</label>
     <div class="section">
       ${Object.keys(OPENING_LABELS.zh).map((id) => `<button class="choice-card ${opening.preset === id ? "active" : ""}" data-opening="${id}"><strong>${OPENING_LABELS[state.lang][id]}</strong></button>`).join("")}
@@ -466,11 +619,23 @@ function motionInspector() {
   const selected = state.project.zooms.find((zoom) => zoom.id === state.selectedZoom);
   const motion = state.project.screen_motions?.find((item) => item.id === state.selectedMotion);
   return `
+    <h2>${t("motion")}</h2>
+    <div class="segmented" style="margin-bottom:12px">
+      <button data-motion-drive="auto" class="${state.motionDrive === "auto" ? "active" : ""}">${t("autoMotion")}</button>
+      <button data-motion-drive="manual" class="${state.motionDrive === "manual" ? "active" : ""}">${t("manualMotion")}</button>
+    </div>
     <div class="segmented" style="margin-bottom:14px">
       <button data-motion-mode="zoom" class="${state.motionMode === "zoom" ? "active" : ""}">${t("scale")}</button>
       <button data-motion-mode="tilt" class="${state.motionMode === "tilt" ? "active" : ""}">${t("tilt")}</button>
     </div>
     ${state.motionMode === "zoom" ? (selected ? `
+      <div class="focus-map" id="focus-map">
+        <div class="reticle" style="left:${Number(selected.focus_x ?? 0.5) * 100}%;top:${Number(selected.focus_y ?? 0.5) * 100}%"></div>
+      </div>
+      <div class="row" style="margin-top:-4px;margin-bottom:12px;font-variant-numeric:tabular-nums">
+        <span>X ${Math.round(Number(selected.focus_x ?? 0.5) * 100)}%</span>
+        <span>Y ${Math.round(Number(selected.focus_y ?? 0.5) * 100)}%</span>
+      </div>
       <div class="knob-row">
         <div class="knob"><strong id="zoom-scale-val">${Number(selected.scale).toFixed(2)}x</strong><span>${t("scale")}</span></div>
         <div class="knob"><strong>${Number(selected.enter || 0).toFixed(1)}s</strong><span>${t("enter")}</span></div>
@@ -481,12 +646,19 @@ function motionInspector() {
       <label class="field">${t("exit")}<input id="zoom-exit" type="range" min="0" max="2" step="0.05" value="${selected.exit || 0.45}"></label>
       <label class="field">${t("easing")}<select id="easing">${options(Object.keys(EASING[state.lang]), selected.easing, EASING[state.lang])}</select></label>
       <button class="btn" id="delete-zoom">${t("deleteZoom")}</button>
-      <p class="note">在预览上点击可设置焦点。</p>` : `<p class="note">在时间线选择一段缩放，或点“${t("zoom")}”。</p>`) : (motion ? `
+      <p class="note">在预览或焦点图上点击可设置焦点。</p>` : `<div class="empty-action">
+        <p class="note">${state.lang === "zh" ? "在时间线选择一段缩放，或在播放头加入运镜。" : "Select a zoom on the timeline, or add one at the playhead."}</p>
+        <button class="btn primary" id="add-zoom">${t("zoom")}</button>
+        <button class="btn" id="auto-zoom">${t("auto")}</button>
+      </div>`) : (motion ? `
       <div class="tilt-pad" id="tilt-pad"><div class="knob-dot" id="tilt-dot" style="left:${50 + Number(motion.rotation_y || 0)}%;top:${50 - Number(motion.rotation_x || 0)}%"></div></div>
       <label class="field">Z 旋转<input id="rotation-z" type="range" min="-30" max="30" step="1" value="${motion.rotation_z || 0}"></label>
       <label class="field">透视<input id="perspective" type="range" min="0" max="2" step="0.05" value="${motion.perspective || 0.65}"></label>
       <label class="field">${t("scale")}<input id="motion-scale" type="range" min="0.5" max="2" step="0.05" value="${motion.scale || 1}"></label>
-      <button class="btn" id="delete-motion">${t("delete")}</button>` : `<p class="note">点“${t("addTilt")}”在播放头加入 3D 运镜。</p>`)}
+      <button class="btn" id="delete-motion">${t("delete")}</button>` : `<div class="empty-action">
+        <p class="note">${state.lang === "zh" ? "在播放头加入 3D 运镜。" : "Add a 3D motion at the playhead."}</p>
+        <button class="btn primary" id="add-tilt">${t("addTilt")}</button>
+      </div>`)}
     ${state.selectedMosaic ? `
       <div class="section"><div class="section-title">${t("mosaic")}</div>
         <label class="field">强度<input id="mosaic-intensity" type="range" min="0.1" max="1" step="0.05" value="${state.selectedMosaic.intensity || 0.55}"></label>
@@ -497,6 +669,7 @@ function motionInspector() {
 function cursorInspector() {
   const cursor = state.project.cursor || {};
   return `
+    <h2>${t("cursor")}</h2>
     <div class="section">
       ${Object.keys(CURSOR_LABELS.zh).map((id) => `<button class="choice-card ${cursor.asset === id ? "active" : ""}" data-cursor="${id}"><strong>${CURSOR_LABELS[state.lang][id]}</strong></button>`).join("")}
     </div>
@@ -509,6 +682,7 @@ function cursorInspector() {
 function cameraInspector() {
   const camera = state.project.camera || {};
   return `
+    <h2>${t("camera")}</h2>
     <label class="row"><input id="camera-enabled" type="checkbox" ${camera.enabled ? "checked" : ""}> 显示摄像头</label>
     <label class="field">形状<select id="camera-shape">${options(["circle","square","horizontal","vertical","original"], camera.shape || "circle", { circle: "圆形", square: "方形", horizontal: "横向", vertical: "纵向", original: "原始比例" })}</select></label>
     <label class="field">大小<input id="camera-size" type="range" min="0.1" max="0.45" step="0.01" value="${camera.size || 0.22}"></label>
@@ -522,15 +696,21 @@ function audioInspector() {
   const audio = state.project.audio || {};
   const clip = Z.locateTimeline(state.project.clips, state.time)?.clip;
   return `
+    <h2>${t("audio")}</h2>
     <div class="section-title">调音台</div>
     <label class="field">系统声音<input id="system-volume" type="range" min="0" max="2" step="0.05" value="${audio.system_volume ?? 1}"></label>
     <label class="row"><input id="system-muted" type="checkbox" ${audio.system_muted ? "checked" : ""}> 静音系统声音</label>
     <label class="field">麦克风<input id="mic-volume" type="range" min="0" max="2" step="0.05" value="${audio.mic_volume ?? 1}"></label>
     <label class="row"><input id="mic-muted" type="checkbox" ${audio.mic_muted ? "checked" : ""}> 静音麦克风</label>
+    <div class="section" style="margin-top:18px">
+      <div class="section-title">${t("export")}</div>
+      <label class="field">${t("resolution")}<select id="resolution">${options(["source", "1080p", "1440p", "4k"], state.project.export.resolution)}</select></label>
+      <label class="field">${t("fps")}<select id="export-fps">${options(["30", "60"], String(state.project.export.fps))}</select></label>
+    </div>
     ${clip ? `
       <div class="section"><div class="section-title">当前片段</div>
         <label class="field">${t("speed")}<input id="speed" type="range" min="0.5" max="4" step="0.25" value="${clip.speed || 1}"></label>
-        <div class="actions">
+        <div class="actions" style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn" id="move-earlier">${t("earlier")}</button>
           <button class="btn" id="move-later">${t("later")}</button>
           <button class="btn ghost" id="delete-clip">${t("deleteClip")}</button>
@@ -557,7 +737,7 @@ function dynamicPreview(id) {
   return map[id] || "#222";
 }
 
-function bind() {
+function bindHome() {
   document.querySelector("#lang")?.addEventListener("click", () => {
     state.lang = state.lang === "zh" ? "en" : "zh";
     localStorage.setItem("dogsc-lang", state.lang);
@@ -570,47 +750,103 @@ function bind() {
     state.projects = await api("/api/projects");
     render();
   });
-  document.querySelector("#go-record")?.addEventListener("click", () => { state.view = "record"; loadSources().then(render); });
-  document.querySelector("#go-demo")?.addEventListener("click", async (event) => {
+  document.querySelectorAll("#go-demo").forEach((node) => node.addEventListener("click", async (event) => {
     event.currentTarget.disabled = true;
     toast(state.lang === "zh" ? "正在生成示例…" : "Creating the example…");
     try { await openProject((await api("/api/demo", { method: "POST" })).id); }
     catch (error) { toast(error.message); }
     finally { event.currentTarget.disabled = false; }
+  }));
+  document.querySelectorAll("#file").forEach((file) => {
+    file.onchange = async () => {
+      const data = new FormData();
+      data.append("file", file.files[0]);
+      try { await openProject((await api("/api/projects/import", { method: "POST", body: data })).id); }
+      catch (error) { toast(error.message); }
+    };
   });
-  const file = document.querySelector("#file");
-  if (file) file.onchange = async () => {
-    const data = new FormData();
-    data.append("file", file.files[0]);
-    try { await openProject((await api("/api/projects/import", { method: "POST", body: data })).id); }
-    catch (error) { toast(error.message); }
-  };
   document.querySelector("#go-path")?.addEventListener("click", async () => {
     const path = prompt(state.lang === "zh" ? "视频文件的绝对路径" : "Absolute path to a video");
     if (!path) return;
     try { await openProject((await api("/api/projects/import", { method: "POST", body: { path } })).id); }
     catch (error) { toast(error.message); }
   });
-  document.querySelectorAll("[data-source]").forEach((node) => node.onclick = () => { state.record.source = node.dataset.source; render(); });
-  document.querySelectorAll("[data-display]").forEach((node) => node.onclick = () => { state.record.display = Number(node.dataset.display); render(); });
-  document.querySelectorAll("[data-window]").forEach((node) => node.onclick = () => { state.record.window = node.dataset.window; render(); });
+  document.querySelector("#mode-wheel")?.addEventListener("click", async () => {
+    state.recorderPopover = state.recorderPopover === "source" ? null : "source";
+    if (state.recorderPopover === "source") await loadSources();
+    render();
+  });
+  document.querySelectorAll("[data-pop]").forEach((node) => node.onclick = async () => {
+    const id = node.dataset.pop;
+    state.recorderPopover = state.recorderPopover === id ? null : id;
+    if (id === "source") await loadSources();
+    render();
+  });
+  document.querySelectorAll("[data-source]").forEach((node) => node.onclick = () => {
+    state.record.source = node.dataset.source;
+    if (node.dataset.source === "region") state.recorderPopover = "source";
+    render();
+  });
+  document.querySelectorAll("[data-display]").forEach((node) => node.onclick = () => {
+    state.record.source = "display";
+    state.record.display = Number(node.dataset.display);
+    state.recorderPopover = null;
+    render();
+  });
+  document.querySelectorAll("[data-window]").forEach((node) => node.onclick = () => {
+    state.record.source = "window";
+    state.record.window = node.dataset.window;
+    state.recorderPopover = null;
+    render();
+  });
   const mic = document.querySelector("#mic");
-  if (mic) mic.onchange = () => { state.record.mic = mic.checked; };
+  if (mic) mic.onchange = () => { state.record.mic = mic.checked; render(); };
   const system = document.querySelector("#system");
-  if (system) system.onchange = () => { state.record.system = system.checked; };
+  if (system) system.onchange = () => { state.record.system = system.checked; render(); };
+  const cam = document.querySelector("#rec-camera");
+  if (cam) cam.onchange = () => { state.record.camera = cam.checked; render(); };
   const fps = document.querySelector("#fps");
   if (fps) fps.onchange = () => { state.record.fps = Number(fps.value); };
   document.querySelector("#pick-region")?.addEventListener("click", async () => {
-    try { state.record.geometry = await api("/api/record/region", { method: "POST", body: {} }); render(); }
-    catch (error) { toast(error.message); }
+    try {
+      state.record.geometry = await api("/api/record/region", { method: "POST", body: {} });
+      state.recorderPopover = null;
+      render();
+    } catch (error) { toast(error.message); }
   });
   document.querySelector("#start-record")?.addEventListener("click", startRecording);
   document.querySelector("#stop-record")?.addEventListener("click", stopRecording);
-  document.querySelector("#cancel-record")?.addEventListener("click", () => { state.view = "home"; render(); });
   document.querySelector("#add-marker")?.addEventListener("click", () => api("/api/record/marker", { method: "POST", body: {} }).catch((error) => toast(error.message)));
+  document.addEventListener("pointerdown", dismissRecorderPopover, { once: true });
+}
 
-  if (state.view !== "editor") return;
-  document.querySelector("#back").onclick = () => { state.view = "home"; state.project = null; state.playing = false; render(); };
+function dismissRecorderPopover(event) {
+  if (!state.recorderPopover) return;
+  if (event.target.closest("#recorder-capsule, #rec-pop, .recorder-dock")) {
+    document.addEventListener("pointerdown", dismissRecorderPopover, { once: true });
+    return;
+  }
+  state.recorderPopover = null;
+  render();
+}
+
+function bind() {
+  if (state.view === "home" || state.view === "record") {
+    bindHome();
+    return;
+  }
+  document.querySelector("#lang")?.addEventListener("click", () => {
+    state.lang = state.lang === "zh" ? "en" : "zh";
+    localStorage.setItem("dogsc-lang", state.lang);
+    render();
+  });
+  document.querySelector("#back").onclick = () => {
+    state.view = "home";
+    state.project = null;
+    state.playing = false;
+    state.hudMenu = null;
+    loadSources().then(render);
+  };
   document.querySelector("#undo").onclick = () => mutate(`/api/projects/${state.project.id}/undo`, {});
   document.querySelector("#redo").onclick = () => mutate(`/api/projects/${state.project.id}/redo`, {});
   document.querySelector("#export").onclick = exportProject;
@@ -618,22 +854,50 @@ function bind() {
   document.querySelector("#step-back").onclick = () => { state.time = Math.max(state.time - 0.1, 0); paintCanvas(); };
   document.querySelector("#step-forward").onclick = () => { state.time = Math.min(state.time + 0.1, Z.duration(state.project.clips)); paintCanvas(); };
   document.querySelector("#split").onclick = () => mutate(`/api/projects/${state.project.id}/split`, { time: state.time });
-  document.querySelector("#add-zoom").onclick = () => mutate(`/api/projects/${state.project.id}/zoom`, { time: state.time, focus_x: 0.5, focus_y: 0.5, scale: 1.6 });
-  document.querySelector("#auto-zoom").onclick = () => mutate(`/api/projects/${state.project.id}/zoom-auto`, {});
-  document.querySelector("#add-tilt").onclick = () => mutate(`/api/projects/${state.project.id}/screen-motion`, { time: state.time, rotation_x: 12, rotation_y: -10 });
-  document.querySelector("#add-mosaic").onclick = () => mutate(`/api/projects/${state.project.id}/mosaic`, { time: state.time });
-  document.querySelector("#add-edit-marker").onclick = () => mutate(`/api/projects/${state.project.id}/marker`, { time: state.time });
+  document.querySelector("#delete-selection")?.addEventListener("click", () => {
+    if (state.selectedZoom) {
+      api(`/api/projects/${state.project.id}/zooms/${state.selectedZoom}`, { method: "DELETE" })
+        .then((project) => { state.project = project; state.selectedZoom = null; render(); })
+        .catch((error) => toast(error.message));
+      return;
+    }
+    const clip = Z.locateTimeline(state.project.clips, state.time)?.clip;
+    if (clip) mutate(`/api/projects/${state.project.id}/delete-clip`, { id: clip.id });
+  });
+  document.querySelector("#restore-cuts")?.addEventListener("click", () => toast(state.lang === "zh" ? "暂无已删除剪辑可恢复" : "No deleted cuts to restore"));
+  document.querySelector("#add-zoom")?.addEventListener("click", () => mutate(`/api/projects/${state.project.id}/zoom`, { time: state.time, focus_x: 0.5, focus_y: 0.5, scale: 1.6 }));
+  document.querySelector("#auto-zoom")?.addEventListener("click", () => mutate(`/api/projects/${state.project.id}/zoom-auto`, {}));
+  document.querySelector("#add-tilt")?.addEventListener("click", () => mutate(`/api/projects/${state.project.id}/screen-motion`, { time: state.time, rotation_x: 12, rotation_y: -10 }));
+  document.querySelector("#add-mosaic")?.addEventListener("click", () => { state.hudMenu = null; mutate(`/api/projects/${state.project.id}/mosaic`, { time: state.time }); });
+  document.querySelector("#add-edit-marker")?.addEventListener("click", () => mutate(`/api/projects/${state.project.id}/marker`, { time: state.time }));
   document.querySelector("#sticker-file")?.addEventListener("change", async (event) => {
     const data = new FormData();
     data.append("file", event.target.files[0]);
     try {
       state.project = await api(`/api/projects/${state.project.id}/sticker-upload`, { method: "POST", body: data });
+      state.hudMenu = null;
       render();
     } catch (error) { toast(error.message); }
   });
   document.querySelector("#project-name").onchange = (event) => meta({ name: event.target.value });
-  document.querySelector("#aspect").onchange = (event) => meta({ canvas: { ...state.project.canvas, aspect: event.target.value } });
-  document.querySelectorAll("[data-tab]").forEach((node) => node.onclick = () => { state.tab = node.dataset.tab; render(); });
+  document.querySelector("#aspect-btn")?.addEventListener("click", () => { state.hudMenu = state.hudMenu === "aspect" ? null : "aspect"; render(); });
+  document.querySelector("#add-btn")?.addEventListener("click", () => { state.hudMenu = state.hudMenu === "add" ? null : "add"; render(); });
+  document.querySelector("#preview-btn")?.addEventListener("click", () => { state.hudMenu = state.hudMenu === "preview" ? null : "preview"; render(); });
+  document.querySelector("#crop-btn")?.addEventListener("click", () => { state.cropping = !state.cropping; state.hudMenu = null; render(); });
+  document.querySelectorAll("[data-aspect]").forEach((node) => node.onclick = () => {
+    state.hudMenu = null;
+    meta({ canvas: { ...state.project.canvas, aspect: node.dataset.aspect } });
+  });
+  document.querySelector("#mode-picture")?.addEventListener("click", () => { state.timelineMode = "picture"; render(); });
+  document.querySelector("#mode-wave")?.addEventListener("click", () => { state.timelineMode = "waveform"; render(); });
+  document.querySelector("#magnetic")?.addEventListener("click", () => { state.magnetic = !state.magnetic; render(); });
+  document.querySelector("#hover-preview")?.addEventListener("click", () => { state.hoverPreview = !state.hoverPreview; render(); });
+  document.querySelector("#fit-all")?.addEventListener("click", () => { state.timelineZoom = 1; render(); });
+  document.querySelector("#timeline-zoom")?.addEventListener("input", (event) => {
+    state.timelineZoom = Number(event.target.value);
+    drawTimeline();
+  });
+  document.querySelectorAll("[data-tab]").forEach((node) => node.onclick = () => { state.tab = node.dataset.tab; state.hudMenu = null; render(); });
   document.querySelectorAll("[data-frame-tab]").forEach((node) => node.onclick = () => { state.frameTab = node.dataset.frameTab; render(); });
   document.querySelectorAll("[data-bg-tab]").forEach((node) => node.onclick = () => {
     state.bgTab = node.dataset.bgTab;
@@ -647,6 +911,15 @@ function bind() {
   document.querySelectorAll("[data-opening]").forEach((node) => node.onclick = () => meta({ opening: { ...state.project.opening, preset: node.dataset.opening, enabled: true } }));
   document.querySelectorAll("[data-cursor]").forEach((node) => node.onclick = () => meta({ cursor: { ...state.project.cursor, asset: node.dataset.cursor } }));
   document.querySelectorAll("[data-motion-mode]").forEach((node) => node.onclick = () => { state.motionMode = node.dataset.motionMode; render(); });
+  document.querySelectorAll("[data-motion-drive]").forEach((node) => node.onclick = () => { state.motionDrive = node.dataset.motionDrive; render(); });
+  document.querySelector("#focus-map")?.addEventListener("click", (event) => {
+    if (!state.selectedZoom) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    updateZoom({
+      focus_x: Z.clamp((event.clientX - rect.left) / rect.width, 0, 1),
+      focus_y: Z.clamp((event.clientY - rect.top) / rect.height, 0, 1),
+    });
+  });
   bindInspectorFields();
 }
 
@@ -799,6 +1072,7 @@ async function loadSources() {
 
 async function startRecording() {
   try {
+    state.recorderPopover = null;
     state.recording = await api("/api/record/start", { method: "POST", body: {
       source: state.record.source,
       display_index: state.record.display,
@@ -808,17 +1082,19 @@ async function startRecording() {
       microphone: state.record.mic,
       system_audio: state.record.system,
     }});
+    state.view = "home";
     render();
     pollRecording();
   } catch (error) { toast(error.message); }
 }
 
 async function pollRecording() {
-  if (state.view !== "record") return;
+  if (state.view !== "home" && state.view !== "record") return;
   try { state.recording = await api("/api/record"); } catch (error) { return; }
   const elapsed = document.querySelector("#elapsed");
   if (elapsed) elapsed.textContent = formatTime(state.recording.elapsed || 0);
   if (state.recording.active) setTimeout(pollRecording, 300);
+  else if (document.querySelector(".record-go.live")) render();
 }
 
 async function stopRecording() {
@@ -906,7 +1182,7 @@ function paintCanvas() {
   const located = Z.locateTimeline(project.clips, state.time);
   if (located && Math.abs(video.currentTime - located.source) > 0.12 && !state.playing) video.currentTime = located.source;
   const clock = document.querySelector("#clock");
-  if (clock) clock.textContent = `${formatTime(state.time)} | ${formatTime(Z.duration(project.clips))}`;
+  if (clock) clock.innerHTML = `${formatTime(state.time)}<em>/ ${formatTime(Z.duration(project.clips))}</em>`;
 }
 
 function backgroundCss(canvas) {
@@ -960,9 +1236,10 @@ function drawTimeline() {
   const lanes = document.querySelector("#lanes");
   if (!lanes || !state.project) return;
   const duration = Math.max(Z.duration(state.project.clips), 0.1);
-  const width = Math.max(lanes.clientWidth - 100, duration * 140);
+  const pxPerSecond = 120 * state.timelineZoom;
+  const width = Math.max(lanes.clientWidth - 100, duration * pxPerSecond);
   const rows = Z.layout(state.project.clips);
-  const makeLane = (label, className, items, paint) => {
+  const makeLane = (label, items, paint) => {
     const wrap = document.createElement("div");
     wrap.style.position = "relative";
     const tag = document.createElement("div");
@@ -979,34 +1256,51 @@ function drawTimeline() {
     wrap.append(tag, lane);
     return { wrap, lane };
   };
-  const clipLane = makeLane("画面", "clip", rows, (lane, row) => {
+  const ruler = document.createElement("div");
+  ruler.className = "ruler";
+  ruler.style.width = `${width}px`;
+  const step = state.timelineZoom >= 3 ? 0.5 : state.timelineZoom >= 1.5 ? 1 : 2;
+  for (let t = 0; t <= duration + 0.001; t += step) {
+    const mark = document.createElement("span");
+    mark.style.left = `${(t / duration) * 100}%`;
+    mark.textContent = formatTime(t).slice(0, 5);
+    ruler.append(mark);
+  }
+  const clipLane = makeLane(state.timelineMode === "waveform" ? "波形" : "画面", rows, (lane, row) => {
     const node = document.createElement("div");
     node.className = "clip";
     node.style.left = `${(row.start / duration) * 100}%`;
     node.style.width = `${(row.duration / duration) * 100}%`;
     node.innerHTML = `<span class="handle left"></span><span class="handle right"></span>`;
-    for (let index = 0; index < 8; index += 1) {
-      const image = document.createElement("img");
-      image.src = `/api/projects/${state.project.id}/thumbs/${index}.jpg`;
-      image.alt = "";
-      image.onerror = () => image.remove();
-      node.append(image);
+    if (state.timelineMode === "waveform") {
+      node.style.background = "linear-gradient(180deg,#3a3d44,#2a2d33)";
+      const wave = document.createElement("div");
+      wave.style.cssText = "position:absolute;inset:8px 6px;opacity:0.75;background:repeating-linear-gradient(90deg,transparent 0 3px,rgba(133,209,66,0.55) 3px 4px)";
+      node.append(wave);
+    } else {
+      for (let index = 0; index < 8; index += 1) {
+        const image = document.createElement("img");
+        image.src = `/api/projects/${state.project.id}/thumbs/${index}.jpg`;
+        image.alt = "";
+        image.onerror = () => image.remove();
+        node.append(image);
+      }
     }
     node.querySelector(".left").onpointerdown = (event) => dragEdge(event, row, "start", duration, width);
     node.querySelector(".right").onpointerdown = (event) => dragEdge(event, row, "end", duration, width);
     lane.append(node);
   });
-  const zoomLane = makeLane("运镜", "zoom", Z.absoluteZooms(state.project.clips, state.project.zooms), (lane, zoom) => {
+  const zoomLane = makeLane("运镜", Z.absoluteZooms(state.project.clips, state.project.zooms), (lane, zoom) => {
     const node = document.createElement("div");
     node.className = `zoom${zoom.id === state.selectedZoom ? " selected" : ""}`;
     const end = Number(zoom.end) + Number(zoom.exit || 0);
     node.style.left = `${(zoom.start / duration) * 100}%`;
     node.style.width = `${Math.max((end - zoom.start) / duration * 100, 1)}%`;
-    node.title = `${Number(zoom.scale).toFixed(1)}x`;
+    node.textContent = `${state.lang === "zh" ? "缩放" : "Zoom"} ${Number(zoom.scale).toFixed(1)}x`;
     node.onclick = () => { state.selectedZoom = zoom.id; state.tab = "motion"; state.motionMode = "zoom"; render(); };
     lane.append(node);
   });
-  const motionLane = makeLane("3D", "motion", (state.project.screen_motions || []).map(absoluteItem), (lane, item) => {
+  const motionLane = makeLane("3D", (state.project.screen_motions || []).map(absoluteItem), (lane, item) => {
     const node = document.createElement("div");
     node.className = `motion${item.id === state.selectedMotion ? " selected" : ""}`;
     const end = Number(item.end) + Number(item.exit || 0);
@@ -1015,7 +1309,7 @@ function drawTimeline() {
     node.onclick = () => { state.selectedMotion = item.id; state.tab = "motion"; state.motionMode = "tilt"; render(); };
     lane.append(node);
   });
-  const mosaicLane = makeLane("马赛克", "mosaic", (state.project.mosaics || []).map(absoluteItem), (lane, item) => {
+  const mosaicLane = makeLane("马赛克", (state.project.mosaics || []).map(absoluteItem), (lane, item) => {
     const node = document.createElement("div");
     node.className = `mosaic${item.id === state.selectedMosaic?.id ? " selected" : ""}`;
     node.style.left = `${(item.start / duration) * 100}%`;
@@ -1023,7 +1317,7 @@ function drawTimeline() {
     node.onclick = () => { state.selectedMosaic = item; state.tab = "motion"; render(); };
     lane.append(node);
   });
-  const stickerLane = makeLane("贴图", "sticker", (state.project.stickers || []).map(absoluteItem), (lane, item) => {
+  const stickerLane = makeLane("贴图", (state.project.stickers || []).map(absoluteItem), (lane, item) => {
     const node = document.createElement("div");
     node.className = "sticker-clip";
     node.style.left = `${(item.start / duration) * 100}%`;
@@ -1043,10 +1337,13 @@ function drawTimeline() {
     clipLane.lane.append(tick);
   });
   lanes.innerHTML = "";
+  lanes.append(ruler);
   [clipLane, zoomLane, motionLane, mosaicLane, stickerLane].forEach((entry) => lanes.append(entry.wrap));
   const seek = (event, lane) => {
     const rect = lane.getBoundingClientRect();
-    state.time = Z.clamp((event.clientX - rect.left) / rect.width, 0, 1) * duration;
+    let time = Z.clamp((event.clientX - rect.left) / rect.width, 0, 1) * duration;
+    if (state.magnetic) time = Math.round(time * 10) / 10;
+    state.time = time;
     state.playing = false;
     paintCanvas();
     head.style.left = `${(state.time / duration) * 100}%`;
@@ -1055,6 +1352,17 @@ function drawTimeline() {
     if (event.target.closest(".handle, .zoom, .motion, .mosaic, .sticker-clip")) return;
     seek(event, clipLane.lane);
   };
+  if (state.hoverPreview) {
+    clipLane.lane.onpointermove = (event) => {
+      if (event.buttons) return;
+      const rect = clipLane.lane.getBoundingClientRect();
+      const preview = Z.clamp((event.clientX - rect.left) / rect.width, 0, 1) * duration;
+      const located = Z.locateTimeline(state.project.clips, preview);
+      const video = document.querySelector("#video");
+      if (video && located) video.currentTime = located.source;
+    };
+    clipLane.lane.onpointerleave = () => paintCanvas();
+  }
 }
 
 function dragEdge(event, row, edge, duration, width) {
@@ -1150,6 +1458,7 @@ async function boot() {
   try {
     state.env = await api("/api/environment");
     state.projects = await api("/api/projects");
+    await loadSources();
   } catch (error) {
     toast(error.message);
   }
