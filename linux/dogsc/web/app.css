@@ -335,12 +335,117 @@ input[type="range"]::-moz-range-thumb {
 
 /* —— Editor —— */
 .shell { height: 100%; display: grid; grid-template-rows: 52px 1fr; }
+.editor-shell .editor-topbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 0 12px 0 14px; height: 46px;
+  background: var(--chrome);
+  border-bottom: 0.5px solid var(--line);
+  backdrop-filter: none;
+}
+.top-leading, .top-trailing {
+  display: flex; align-items: center; gap: 4px; min-width: 0;
+}
+.top-leading { flex: 1; }
+.top-trailing { flex: 0 0 auto; }
+.project-menu {
+  width: auto !important; min-width: 44px; padding: 0 8px !important; gap: 2px;
+  color: var(--muted);
+}
+.project-menu .icon-svg { width: 15px; height: 15px; }
+.editor-topbar .title {
+  border: 0; background: transparent; font-weight: 600; font-size: 13px;
+  padding: 6px 8px; border-radius: 8px; min-width: 96px; max-width: 260px;
+  letter-spacing: -0.01em;
+}
+.editor-topbar .title:hover, .editor-topbar .title:focus { background: var(--selection); outline: none; }
+.editor-topbar .saved {
+  display: inline-flex; align-items: center; gap: 4px; color: var(--faint);
+  font-size: 12px; font-weight: 500; padding: 0 4px;
+}
+.editor-topbar .saved .icon-svg { width: 13px; height: 13px; stroke-width: 1.8; }
+.toolbar-divider {
+  width: 1px; height: 18px; background: var(--line); margin: 0 6px;
+}
+.export-btn { padding: 0 14px; gap: 6px; height: 30px; border-radius: 999px; }
+.export-btn .icon-svg { width: 14px; height: 14px; stroke: currentColor; }
 .editor {
   height: 100%;
   display: grid;
   grid-template-rows: 1fr 248px;
   background: var(--bg);
   min-height: 0;
+}
+.inspector-scope {
+  background: var(--well); border-radius: var(--radius-card); padding: 11px;
+  margin-bottom: 14px;
+  box-shadow: inset 0 0.5px 0 rgba(255,255,255,0.5);
+}
+.scope-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 9px; }
+.scope-title { font-size: 11px; font-weight: 600; color: var(--muted); letter-spacing: 0.02em; }
+.scope-chip {
+  font-size: 10px; font-weight: 600; color: var(--muted);
+  background: rgba(0,0,0,0.07); border-radius: 999px; padding: 4px 7px;
+}
+.scope-add { width: 100%; height: 32px; border-radius: 999px; }
+.scope-card {
+  background: var(--well); border-radius: var(--radius-card); padding: 14px;
+}
+.field-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: 12px; color: var(--muted); font-weight: 500;
+}
+.field-head em {
+  font-style: normal; color: var(--ink); font-weight: 600;
+  font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+}
+.wallpaper-grid .tile { height: 72px; }
+.coord-row {
+  display: flex; gap: 16px; margin: 0 0 12px;
+  font-variant-numeric: tabular-nums; font-size: 12px; color: var(--muted); font-weight: 500;
+}
+.envelope {
+  background: var(--well); border-radius: var(--radius-card); padding: 10px 10px 6px;
+  margin-bottom: 12px;
+}
+.envelope svg { width: 100%; height: 72px; display: block; }
+.envelope .env-grid { fill: none; stroke: rgba(0,0,0,0.06); stroke-width: 1; }
+.envelope .env-curve { fill: none; stroke: var(--platinum); stroke-width: 2.2; stroke-linecap: round; }
+.envelope circle { fill: var(--panel); stroke: var(--platinum); stroke-width: 1.6; }
+.env-labels {
+  display: flex; justify-content: space-between; margin-top: 4px;
+  font-size: 10px; color: var(--faint); font-weight: 500;
+}
+.dial-row {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px;
+}
+.dial { text-align: center; }
+.dial-face {
+  width: 72px; height: 72px; margin: 0 auto 6px; border-radius: 99px; position: relative;
+  background:
+    radial-gradient(circle at 50% 50%, #fdfdfe 0 40%, transparent 41%),
+    conic-gradient(from -135deg, var(--platinum) 0 var(--sweep, 0deg), rgba(0,0,0,0.08) 0 270deg, transparent 0 360deg);
+  box-shadow: var(--contact-shadow), inset 0 0.5px 0 rgba(255,255,255,0.9);
+}
+.dial-face i {
+  position: absolute; left: 50%; top: 50%; width: 2px; height: 22px; margin-left: -1px; margin-top: -22px;
+  background: var(--platinum); border-radius: 2px; transform-origin: bottom center;
+  transform: rotate(var(--angle, -135deg));
+  box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+}
+.dial-face strong {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: 13px; font-weight: 600; letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.dial > span { font-size: 11px; color: var(--faint); font-weight: 500; }
+.focus-map .focus-preview {
+  position: absolute; inset: 10px; border-radius: 8px; background: rgba(0,0,0,0.18);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12);
+}
+.mode-pair button.active {
+  background: linear-gradient(180deg, #2c2c2c, var(--platinum-deep));
+  color: var(--on-accent);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.12) inset;
 }
 .workspace {
   min-height: 0;

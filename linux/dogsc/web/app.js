@@ -66,6 +66,11 @@ const ICONS = {
   plus: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M9 4v10M4 9h10"/></svg>`,
   sliders: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M3 5.5h12M3 12.5h12"/><circle cx="7" cy="5.5" r="1.8"/><circle cx="11" cy="12.5" r="1.8"/></svg>`,
   chevron: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M6 7l3 3 3-3M6 4.5l3-1.5 3 1.5"/></svg>`,
+  folder: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M2.5 5.5h4l1.4 1.5H15.5v7.5a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1z"/><path d="M2.5 5.5V4.2A1.2 1.2 0 0 1 3.7 3h3.1l1.2 1.4"/></svg>`,
+  chevronDown: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M5 7.2l4 4 4-4"/></svg>`,
+  share: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M9 11.5V3.5M6.2 5.8L9 3.2l2.8 2.6"/><path d="M4 10.5v3a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-3"/></svg>`,
+  gear: `<svg class="icon-svg sm" viewBox="0 0 18 18"><circle cx="9" cy="9" r="2.2"/><path d="M9 2.6l.7 1.6 1.7-.2.9 1.5-1.2 1.2.5 1.6-1.6.7-.2 1.7-1.5.9-1.2-1.2-1.6.5-.7-1.6-1.7.2-.9-1.5 1.2-1.2-.5-1.6 1.6-.7.2-1.7 1.5-.9z"/></svg>`,
+  check: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M4.5 9.2l3 3 6-6.5"/></svg>`,
 };
 
 const STR = {
@@ -277,9 +282,45 @@ function escapeHtml(value) {
 }
 function formatTime(seconds) {
   const safe = Math.max(Number(seconds) || 0, 0);
-  const minutes = Math.floor(safe / 60);
-  const rest = safe - minutes * 60;
-  return `${String(minutes).padStart(2, "0")}:${rest.toFixed(2).padStart(5, "0")}`;
+  const centiseconds = Math.floor(safe * 100 + 1e-9);
+  const minutes = Math.floor(centiseconds / 6000);
+  const secs = Math.floor((centiseconds % 6000) / 100);
+  const cs = centiseconds % 100;
+  return `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;
+}
+
+function fieldValue(label, value) {
+  return `<div class="field-head"><span>${label}</span><em>${value}</em></div>`;
+}
+
+function dialHtml(label, valueText, ratio) {
+  const clamped = Math.max(0, Math.min(1, ratio));
+  const angle = clamped * 270 - 135;
+  const sweep = Math.round(clamped * 270);
+  return `<div class="dial" title="${escapeHtml(label)}">
+    <div class="dial-face" style="--angle:${angle}deg;--sweep:${sweep}deg">
+      <i></i><strong>${escapeHtml(valueText)}</strong>
+    </div>
+    <span>${escapeHtml(label)}</span>
+  </div>`;
+}
+
+function envelopeHtml(easing) {
+  const paths = {
+    linear: "M8 52 L92 12",
+    quadratic: "M8 52 Q 40 48 50 32 T 92 12",
+    cubic: "M8 52 C 28 52, 40 12, 92 12",
+    quintic: "M8 52 C 45 52, 55 12, 92 12",
+    spring: "M8 52 C 30 52, 38 8, 55 20 S 78 10, 92 14",
+  };
+  return `<div class="envelope" aria-hidden="true">
+    <svg viewBox="0 0 100 64" preserveAspectRatio="none">
+      <path class="env-grid" d="M8 12 H92 M8 32 H92 M8 52 H92"/>
+      <path class="env-curve" d="${paths[easing] || paths.cubic}"/>
+      <circle cx="8" cy="52" r="3.2"/><circle cx="50" cy="28" r="3.2"/><circle cx="92" cy="12" r="3.2"/>
+    </svg>
+    <div class="env-labels"><span>Ease In</span><span>Hold</span><span>Ease Out</span></div>
+  </div>`;
 }
 function options(values, current, labels) {
   return values.map((value) => `<option value="${value}" ${String(value) === String(current) ? "selected" : ""}>${labels ? (labels[value] || value) : value}</option>`).join("");
@@ -322,14 +363,7 @@ function sourceLabel(kind) {
 }
 
 function parityNoteHtml() {
-  const parity = state.env?.parity;
-  if (!parity) return "";
-  const next = (parity.choices || []).find((item) => item.id === parity.recommended);
-  if (!next) return "";
-  const label = state.lang === "zh"
-    ? `动效/预览对齐路径：当前 Soft Silver Web 桥接 · 下一目标 ${next.title}`
-    : `Parity path: Soft Silver web bridge now · next ${next.title}`;
-  return `<p class="note parity-note">${escapeHtml(label)}</p>`;
+  return "";
 }
 
 function recorderCapsuleHtml() {
@@ -435,7 +469,6 @@ function homeHtml() {
           <button class="btn" id="go-demo">${t("demo")}</button>
           <label class="btn">${t("import")}<input id="file" type="file" accept="video/*" hidden></label>
         </div>
-        ${parityNoteHtml()}
       </div>
       <aside class="projects-drawer island">
         <h2>${t("projects")}</h2>
@@ -492,7 +525,7 @@ function stageHudHtml(project) {
     <button class="hud-btn" id="step-back" title="上一帧">${ICONS.prev}</button>
     <button class="play-btn ${state.playing ? "playing" : ""}" id="play" title="${state.playing ? t("pause") : t("playing")}">${state.playing ? ICONS.pause : ICONS.play}</button>
     <button class="hud-btn" id="step-forward" title="下一帧">${ICONS.next}</button>
-    <span class="hud-time" id="clock">${formatTime(state.time)}<em>/ ${formatTime(Z.duration(project.clips))}</em></span>
+    <span class="hud-time" id="clock">${formatTime(state.time)} <em>/ ${formatTime(Z.duration(project.clips))}</em></span>
   </div>`;
 }
 
@@ -518,20 +551,23 @@ function timelineBarHtml() {
 
 function editorHtml() {
   const project = state.project;
-  const center = `
-    <button class="btn ghost" id="back">${t("back")}</button>
-    <input class="title" id="project-name" value="${escapeHtml(project.name)}">
-    <span class="saved">${t("saved")}</span>
-    <button class="btn icon" id="undo" title="${t("undo")}">${ICONS.undo}</button>
-    <button class="btn icon" id="redo" title="${t("redo")}">${ICONS.redo}</button>`;
-  const actions = `
-    <button class="btn ghost" id="lang">${t("lang")}</button>
-    <button class="btn primary" id="export">${t("export")}</button>`;
-  return `<div class="shell">
-    <header class="topbar">
-      <div class="brand"><span class="logo"></span><div><strong>DogSC</strong><em id="platform-pill">Linux</em></div></div>
-      <div class="top-center">${center}</div>
-      <div class="top-actions">${actions}</div>
+  return `<div class="shell editor-shell">
+    <header class="topbar editor-topbar">
+      <div class="top-leading">
+        <button class="btn icon project-menu" id="back" title="${t("back")}">${ICONS.folder}${ICONS.chevronDown}</button>
+        <input class="title" id="project-name" value="${escapeHtml(project.name)}">
+        <span class="saved">${ICONS.check}<span>${t("saved")}</span></span>
+        <span class="toolbar-divider"></span>
+        <button class="btn icon" id="undo" title="${t("undo")}">${ICONS.undo}</button>
+        <button class="btn icon" id="redo" title="${t("redo")}">${ICONS.redo}</button>
+      </div>
+      <div class="top-trailing">
+        <button class="btn icon" id="lang" title="${t("lang")}">${t("lang") === "English" ? "EN" : "中"}</button>
+        <button class="btn icon" id="settings-btn" title="${t("settings")}">${ICONS.gear}</button>
+        <button class="btn icon danger" id="delete-project" title="${t("delete")}">${ICONS.trash}</button>
+        <span class="toolbar-divider"></span>
+        <button class="btn primary export-btn" id="export">${ICONS.share}<span>${t("export")}</span></button>
+      </div>
     </header>
     <section class="editor">
       <div class="workspace">
@@ -565,9 +601,11 @@ function inspectorBody() {
 function frameInspector() {
   const canvas = state.project.canvas;
   return `
-    <h2>${t("frame")}</h2>
-    <div class="segmented" style="margin-bottom:14px">
-      ${["background","layout","mockup"].map((id) => `<button data-frame-tab="${id}" class="${state.frameTab === id ? "active" : ""}">${t(id)}</button>`).join("")}
+    <div class="inspector-scope">
+      <div class="scope-title">${t("frame")}</div>
+      <div class="segmented">
+        ${["background","layout","mockup"].map((id) => `<button data-frame-tab="${id}" class="${state.frameTab === id ? "active" : ""}">${t(id)}</button>`).join("")}
+      </div>
     </div>
     ${state.frameTab === "background" ? backgroundPanel(canvas) : ""}
     ${state.frameTab === "layout" ? layoutPanel(canvas) : ""}
@@ -575,49 +613,52 @@ function frameInspector() {
 }
 
 function backgroundPanel(canvas) {
+  const solids = [
+    ["#16161a", "深墨"], ["#0b1c2c", "午夜"], ["#1d2430", "石墨"],
+    ["#203040", "海雾"], ["#2c241c", "暖褐"], ["#f4f1ea", "宣纸"],
+  ];
   return `
+    <div class="section-title">${state.lang === "zh" ? "背景素材" : "Background"}</div>
     <div class="segmented" style="margin-bottom:12px">
       ${["wallpaper","pattern","dynamic","custom"].map((id) => `<button data-bg-tab="${id}" class="${state.bgTab === id ? "active" : ""}">${t(id)}</button>`).join("")}
     </div>
     ${state.bgTab === "wallpaper" || state.bgTab === "custom" ? `
-      <label class="field">${t("background")}
-        <span class="swatches">
-          <input id="background" type="color" value="${canvas.background || "#16161a"}">
-          ${["#16161a", "#f4f1ea", "#1d2430", "#2c241c", "#0b1c2c", "#203040"].map((color) => `<button data-color="${color}" style="background:${color}"></button>`).join("")}
-        </span>
-      </label>` : ""}
+      <div class="preset-grid wallpaper-grid">
+        ${solids.map(([color, label]) => `<button class="tile ${canvas.background === color && !canvas.pattern && !canvas.dynamic ? "active" : ""}" data-color="${color}" style="background:${color}"><span>${state.lang === "zh" ? label : color}</span></button>`).join("")}
+      </div>
+      <label class="field">${fieldValue(t("background"), "")}<input id="background" type="color" value="${canvas.background || "#16161a"}"></label>` : ""}
     ${state.bgTab === "pattern" ? `
-      <div class="preset-grid">
+      <div class="preset-grid wallpaper-grid">
         ${Object.keys(PATTERN_LABELS.zh).map((id) => `<button class="tile ${canvas.pattern === id ? "active" : ""}" data-pattern="${id}" style="background:${patternPreview(id)}"><span>${PATTERN_LABELS[state.lang][id]}</span></button>`).join("")}
       </div>
-      <label class="field">${t("scale")}<input id="pattern-scale" type="range" min="0.5" max="5" step="0.1" value="${canvas.pattern_scale || 1}"></label>
-      <label class="field">不透明度<input id="pattern-opacity" type="range" min="0.05" max="1" step="0.05" value="${canvas.pattern_opacity || 1}"></label>` : ""}
+      <label class="field">${fieldValue(t("scale"), `${Number(canvas.pattern_scale || 1).toFixed(1)}x`)}<input id="pattern-scale" type="range" min="0.5" max="5" step="0.1" value="${canvas.pattern_scale || 1}"></label>
+      <label class="field">${fieldValue(state.lang === "zh" ? "不透明度" : "Opacity", `${Math.round((canvas.pattern_opacity || 1) * 100)}%`)}<input id="pattern-opacity" type="range" min="0.05" max="1" step="0.05" value="${canvas.pattern_opacity || 1}"></label>` : ""}
     ${state.bgTab === "dynamic" ? `
-      <div class="preset-grid">
+      <div class="preset-grid wallpaper-grid">
         ${Object.keys(DYNAMIC_LABELS.zh).map((id) => `<button class="tile ${canvas.dynamic === id ? "active" : ""}" data-dynamic="${id}" style="background:${dynamicPreview(id)}"><span>${DYNAMIC_LABELS[state.lang][id]}</span></button>`).join("")}
       </div>` : ""}`;
 }
 
 function layoutPanel(canvas) {
   return `
-    <label class="field">${t("padding")}<input id="padding" type="range" min="0" max="0.25" step="0.01" value="${canvas.padding}"></label>
-    <label class="field">${t("radius")}<input id="radius" type="range" min="0" max="80" step="1" value="${canvas.radius}"></label>
-    <label class="field">${t("shadow")}<input id="shadow" type="range" min="0" max="1" step="0.05" value="${canvas.shadow}"></label>
-    <label class="field">${t("border")}<input id="border" type="range" min="0" max="24" step="1" value="${canvas.border || 0}"></label>
-    <label class="field">${t("scale")}<input id="content-scale" type="range" min="0.5" max="1.5" step="0.01" value="${canvas.content_scale || 1}"></label>
-    <label class="field">水平位置<input id="content-x" type="range" min="0" max="1" step="0.01" value="${canvas.content_x ?? 0.5}"></label>
-    <label class="field">垂直位置<input id="content-y" type="range" min="0" max="1" step="0.01" value="${canvas.content_y ?? 0.5}"></label>`;
+    <label class="field">${fieldValue(t("padding"), `${Math.round((canvas.padding || 0) * 100)}%`)}<input id="padding" type="range" min="0" max="0.25" step="0.01" value="${canvas.padding}"></label>
+    <label class="field">${fieldValue(t("radius"), `${Math.round(canvas.radius || 0)}`)}<input id="radius" type="range" min="0" max="80" step="1" value="${canvas.radius}"></label>
+    <label class="field">${fieldValue(t("shadow"), `${Math.round((canvas.shadow || 0) * 100)}%`)}<input id="shadow" type="range" min="0" max="1" step="0.05" value="${canvas.shadow}"></label>
+    <label class="field">${fieldValue(t("border"), `${Math.round(canvas.border || 0)}`)}<input id="border" type="range" min="0" max="24" step="1" value="${canvas.border || 0}"></label>
+    <label class="field">${fieldValue(t("scale"), `${Number(canvas.content_scale || 1).toFixed(2)}x`)}<input id="content-scale" type="range" min="0.5" max="1.5" step="0.01" value="${canvas.content_scale || 1}"></label>
+    <label class="field">${fieldValue(state.lang === "zh" ? "水平位置" : "X", `${Math.round((canvas.content_x ?? 0.5) * 100)}%`)}<input id="content-x" type="range" min="0" max="1" step="0.01" value="${canvas.content_x ?? 0.5}"></label>
+    <label class="field">${fieldValue(state.lang === "zh" ? "垂直位置" : "Y", `${Math.round((canvas.content_y ?? 0.5) * 100)}%`)}<input id="content-y" type="range" min="0" max="1" step="0.01" value="${canvas.content_y ?? 0.5}"></label>`;
 }
 
 function mockupPanel(canvas) {
   return `
-    <div class="section">
+    <div class="section mockup-list">
       ${Object.keys(FRAME_LABELS.zh).map((id) => `<button class="choice-card ${canvas.screen_frame === id ? "active" : ""}" data-frame="${id}"><strong>${FRAME_LABELS[state.lang][id]}</strong></button>`).join("")}
     </div>
-    <label class="field">框体比例<input id="frame-scale" type="range" min="0.6" max="1.6" step="0.05" value="${canvas.frame_scale || 1}"></label>
-    <label class="field">顶栏高度<input id="toolbar-scale" type="range" min="0.65" max="1.6" step="0.05" value="${canvas.toolbar_scale || 1}"></label>
-    <label class="field">标题<input id="frame-title" type="text" value="${escapeHtml(canvas.frame_title || "DogSC")}"></label>
-    <label class="field">地址<input id="frame-address" type="text" value="${escapeHtml(canvas.frame_address || "dogsc.app")}"></label>`;
+    <label class="field">${fieldValue(state.lang === "zh" ? "框体比例" : "Frame", `${Number(canvas.frame_scale || 1).toFixed(2)}x`)}<input id="frame-scale" type="range" min="0.6" max="1.6" step="0.05" value="${canvas.frame_scale || 1}"></label>
+    <label class="field">${fieldValue(state.lang === "zh" ? "顶栏高度" : "Toolbar", `${Number(canvas.toolbar_scale || 1).toFixed(2)}x`)}<input id="toolbar-scale" type="range" min="0.65" max="1.6" step="0.05" value="${canvas.toolbar_scale || 1}"></label>
+    <label class="field">${state.lang === "zh" ? "标题" : "Title"}<input id="frame-title" type="text" value="${escapeHtml(canvas.frame_title || "DogSC")}"></label>
+    <label class="field">${state.lang === "zh" ? "地址" : "Address"}<input id="frame-address" type="text" value="${escapeHtml(canvas.frame_address || "dogsc.app")}"></label>`;
 }
 
 function openingInspector() {
@@ -635,50 +676,57 @@ function openingInspector() {
 function motionInspector() {
   const selected = state.project.zooms.find((zoom) => zoom.id === state.selectedZoom);
   const motion = state.project.screen_motions?.find((item) => item.id === state.selectedMotion);
+  const zh = state.lang === "zh";
   return `
-    <h2>${t("motion")}</h2>
-    <div class="segmented" style="margin-bottom:12px">
+    <div class="inspector-scope">
+      <div class="scope-row">
+        <div class="scope-title">${t("motion")}</div>
+        <span class="scope-chip">${selected || motion ? (zh ? "已选中" : "Selected") : (zh ? "初始状态" : "Idle")}</span>
+      </div>
+      <button class="btn primary scope-add" id="${state.motionMode === "tilt" ? "add-tilt" : "add-zoom"}">${state.motionMode === "tilt" ? t("addTilt") : t("zoom")}</button>
+    </div>
+    <div class="segmented" style="margin-bottom:10px">
       <button data-motion-drive="auto" class="${state.motionDrive === "auto" ? "active" : ""}">${t("autoMotion")}</button>
       <button data-motion-drive="manual" class="${state.motionDrive === "manual" ? "active" : ""}">${t("manualMotion")}</button>
     </div>
-    <div class="segmented" style="margin-bottom:14px">
-      <button data-motion-mode="zoom" class="${state.motionMode === "zoom" ? "active" : ""}">${t("scale")}</button>
-      <button data-motion-mode="tilt" class="${state.motionMode === "tilt" ? "active" : ""}">${t("tilt")}</button>
+    <div class="segmented mode-pair" style="margin-bottom:14px">
+      <button data-motion-mode="zoom" class="${state.motionMode === "zoom" ? "active" : ""}">${zh ? "缩放" : "Zoom"}</button>
+      <button data-motion-mode="tilt" class="${state.motionMode === "tilt" ? "active" : ""}">${zh ? "屏幕 3D" : "Screen 3D"}</button>
     </div>
     ${state.motionMode === "zoom" ? (selected ? `
-      <div class="focus-map" id="focus-map">
+      <div class="focus-map" id="focus-map" style="background:${backgroundCss(state.project.canvas)}">
+        <div class="focus-preview"></div>
         <div class="reticle" style="left:${Number(selected.focus_x ?? 0.5) * 100}%;top:${Number(selected.focus_y ?? 0.5) * 100}%"></div>
       </div>
-      <div class="row" style="margin-top:-4px;margin-bottom:12px;font-variant-numeric:tabular-nums">
+      <div class="coord-row">
         <span>X ${Math.round(Number(selected.focus_x ?? 0.5) * 100)}%</span>
         <span>Y ${Math.round(Number(selected.focus_y ?? 0.5) * 100)}%</span>
       </div>
-      <div class="knob-row">
-        <div class="knob"><strong id="zoom-scale-val">${Number(selected.scale).toFixed(2)}x</strong><span>${t("scale")}</span></div>
-        <div class="knob"><strong>${Number(selected.enter || 0).toFixed(1)}s</strong><span>${t("enter")}</span></div>
-        <div class="knob"><strong>${Number(selected.exit || 0).toFixed(1)}s</strong><span>${t("exit")}</span></div>
+      ${envelopeHtml(selected.easing || "cubic")}
+      <div class="dial-row">
+        ${dialHtml(zh ? "放大" : "Zoom", `${Number(selected.scale).toFixed(2)}x`, (Number(selected.scale) - 1) / 3)}
+        ${dialHtml(zh ? "进入" : "In", `${Number(selected.enter || 0.45).toFixed(1)}s`, Number(selected.enter || 0.45) / 2)}
+        ${dialHtml(zh ? "退出" : "Out", `${Number(selected.exit || 0.45).toFixed(1)}s`, Number(selected.exit || 0.45) / 2)}
       </div>
-      <label class="field">${t("scale")}<input id="zoom-scale" type="range" min="1" max="4" step="0.05" value="${selected.scale}"></label>
-      <label class="field">${t("enter")}<input id="zoom-enter" type="range" min="0" max="2" step="0.05" value="${selected.enter || 0.45}"></label>
-      <label class="field">${t("exit")}<input id="zoom-exit" type="range" min="0" max="2" step="0.05" value="${selected.exit || 0.45}"></label>
+      <label class="field">${fieldValue(t("scale"), `${Number(selected.scale).toFixed(2)}x`)}<input id="zoom-scale" type="range" min="1" max="4" step="0.05" value="${selected.scale}"></label>
+      <label class="field">${fieldValue(t("enter"), `${Number(selected.enter || 0.45).toFixed(2)}s`)}<input id="zoom-enter" type="range" min="0" max="2" step="0.05" value="${selected.enter || 0.45}"></label>
+      <label class="field">${fieldValue(t("exit"), `${Number(selected.exit || 0.45).toFixed(2)}s`)}<input id="zoom-exit" type="range" min="0" max="2" step="0.05" value="${selected.exit || 0.45}"></label>
       <label class="field">${t("easing")}<select id="easing">${options(Object.keys(EASING[state.lang]), selected.easing, EASING[state.lang])}</select></label>
-      <button class="btn" id="delete-zoom">${t("deleteZoom")}</button>
-      <p class="note">在预览或焦点图上点击可设置焦点。</p>` : `<div class="empty-action">
-        <p class="note">${state.lang === "zh" ? "在时间线选择一段缩放，或在播放头加入运镜。" : "Select a zoom on the timeline, or add one at the playhead."}</p>
-        <button class="btn primary" id="add-zoom">${t("zoom")}</button>
+      <button class="btn" id="apply-all-zooms" style="width:100%;margin:8px 0">${t("applyAll")}</button>
+      <button class="btn ghost" id="delete-zoom">${t("deleteZoom")}</button>` : `<div class="empty-action scope-card">
+        <p class="note">${zh ? "在时间线选择一段缩放，或在播放头加入运镜。" : "Select a zoom on the timeline, or add one at the playhead."}</p>
         <button class="btn" id="auto-zoom">${t("auto")}</button>
       </div>`) : (motion ? `
       <div class="tilt-pad" id="tilt-pad"><div class="knob-dot" id="tilt-dot" style="left:${50 + Number(motion.rotation_y || 0)}%;top:${50 - Number(motion.rotation_x || 0)}%"></div></div>
-      <label class="field">Z 旋转<input id="rotation-z" type="range" min="-30" max="30" step="1" value="${motion.rotation_z || 0}"></label>
-      <label class="field">透视<input id="perspective" type="range" min="0" max="2" step="0.05" value="${motion.perspective || 0.65}"></label>
-      <label class="field">${t("scale")}<input id="motion-scale" type="range" min="0.5" max="2" step="0.05" value="${motion.scale || 1}"></label>
-      <button class="btn" id="delete-motion">${t("delete")}</button>` : `<div class="empty-action">
-        <p class="note">${state.lang === "zh" ? "在播放头加入 3D 运镜。" : "Add a 3D motion at the playhead."}</p>
-        <button class="btn primary" id="add-tilt">${t("addTilt")}</button>
+      <label class="field">${fieldValue("Z", `${Math.round(motion.rotation_z || 0)}°`)}<input id="rotation-z" type="range" min="-30" max="30" step="1" value="${motion.rotation_z || 0}"></label>
+      <label class="field">${fieldValue(zh ? "透视" : "Perspective", Number(motion.perspective || 0.65).toFixed(2))}<input id="perspective" type="range" min="0" max="2" step="0.05" value="${motion.perspective || 0.65}"></label>
+      <label class="field">${fieldValue(t("scale"), `${Number(motion.scale || 1).toFixed(2)}x`)}<input id="motion-scale" type="range" min="0.5" max="2" step="0.05" value="${motion.scale || 1}"></label>
+      <button class="btn ghost" id="delete-motion">${t("delete")}</button>` : `<div class="empty-action scope-card">
+        <p class="note">${zh ? "在播放头加入 3D 运镜。" : "Add a 3D motion at the playhead."}</p>
       </div>`)}
     ${state.selectedMosaic ? `
       <div class="section"><div class="section-title">${t("mosaic")}</div>
-        <label class="field">强度<input id="mosaic-intensity" type="range" min="0.1" max="1" step="0.05" value="${state.selectedMosaic.intensity || 0.55}"></label>
+        <label class="field">${fieldValue(zh ? "强度" : "Strength", `${Math.round((state.selectedMosaic.intensity || 0.55) * 100)}%`)}<input id="mosaic-intensity" type="range" min="0.1" max="1" step="0.05" value="${state.selectedMosaic.intensity || 0.55}"></label>
         <button class="btn" id="delete-mosaic">${t("delete")}</button>
       </div>` : ""}`;
 }
@@ -864,9 +912,36 @@ function bind() {
     state.hudMenu = null;
     loadSources().then(render);
   };
+  document.querySelector("#delete-project")?.addEventListener("click", async () => {
+    if (!confirm(state.lang === "zh" ? "删除当前项目？" : "Delete this project?")) return;
+    await api(`/api/projects/${state.project.id}`, { method: "DELETE" });
+    state.project = null;
+    state.view = "home";
+    state.projects = await api("/api/projects");
+    render();
+  });
+  document.querySelector("#settings-btn")?.addEventListener("click", () => {
+    state.lang = state.lang === "zh" ? "en" : "zh";
+    localStorage.setItem("dogsc-lang", state.lang);
+    render();
+  });
   document.querySelector("#undo").onclick = () => mutate(`/api/projects/${state.project.id}/undo`, {});
   document.querySelector("#redo").onclick = () => mutate(`/api/projects/${state.project.id}/redo`, {});
   document.querySelector("#export").onclick = exportProject;
+  document.querySelector("#apply-all-zooms")?.addEventListener("click", async () => {
+    const selected = state.project.zooms.find((zoom) => zoom.id === state.selectedZoom);
+    if (!selected) return;
+    try {
+      for (const zoom of state.project.zooms) {
+        state.project = await api(`/api/projects/${state.project.id}/zoom-update`, {
+          method: "POST",
+          body: { id: zoom.id, scale: selected.scale, enter: selected.enter, exit: selected.exit, easing: selected.easing },
+        });
+      }
+      toast(state.lang === "zh" ? "已应用到全部运镜" : "Applied to all zooms");
+      render();
+    } catch (error) { toast(error.message); }
+  });
   document.querySelector("#play").onclick = togglePlay;
   document.querySelector("#step-back").onclick = () => { state.time = Math.max(state.time - 0.1, 0); paintCanvas(); };
   document.querySelector("#step-forward").onclick = () => { state.time = Math.min(state.time + 0.1, Z.duration(state.project.clips)); paintCanvas(); };
@@ -1205,7 +1280,7 @@ function paintCanvas() {
   const located = Z.locateTimeline(project.clips, state.time);
   if (located && !state.playing) DogSCPreview.seekCoalesced(located.source, false);
   const clock = document.querySelector("#clock");
-  if (clock) clock.innerHTML = `${formatTime(state.time)}<em>/ ${formatTime(Z.duration(project.clips))}</em>`;
+  if (clock) clock.innerHTML = `${formatTime(state.time)} <em>/ ${formatTime(Z.duration(project.clips))}</em>`;
 }
 
 function backgroundCss(canvas) {
@@ -1319,7 +1394,7 @@ function drawTimeline() {
     const end = Number(zoom.end) + Number(zoom.exit || 0);
     node.style.left = `${(zoom.start / duration) * 100}%`;
     node.style.width = `${Math.max((end - zoom.start) / duration * 100, 1)}%`;
-    node.textContent = `${state.lang === "zh" ? "缩放" : "Zoom"} ${Number(zoom.scale).toFixed(1)}x`;
+    node.textContent = `${state.lang === "zh" ? "缩放" : "Zoom"} ${Number(zoom.scale).toFixed(1)}x${zoom.auto || state.motionDrive === "auto" ? (state.lang === "zh" ? " · 自动" : " · Auto") : ""}`;
     node.onclick = () => { state.selectedZoom = zoom.id; state.tab = "motion"; state.motionMode = "zoom"; render(); };
     lane.append(node);
   });
