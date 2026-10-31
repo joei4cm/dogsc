@@ -307,6 +307,11 @@ function render() {
     mountPreview();
     drawTimeline();
     paintCanvas();
+    requestAnimationFrame(() => {
+      const rail = document.querySelector(".inspector-rail");
+      const active = rail?.querySelector("button.active");
+      DogSCMotion.slideThumb(rail, active);
+    });
   }
   const pill = document.querySelector("#platform-pill");
   if (pill && state.env) pill.textContent = `${state.env.os_name?.split(" ")[0] || "Linux"} · ${state.env.backend_label || state.env.backend}`;
@@ -314,6 +319,17 @@ function render() {
 
 function sourceLabel(kind) {
   return t(kind === "region" ? "region" : kind);
+}
+
+function parityNoteHtml() {
+  const parity = state.env?.parity;
+  if (!parity) return "";
+  const next = (parity.choices || []).find((item) => item.id === parity.recommended);
+  if (!next) return "";
+  const label = state.lang === "zh"
+    ? `动效/预览对齐路径：当前 Soft Silver Web 桥接 · 下一目标 ${next.title}`
+    : `Parity path: Soft Silver web bridge now · next ${next.title}`;
+  return `<p class="note parity-note">${escapeHtml(label)}</p>`;
 }
 
 function recorderCapsuleHtml() {
@@ -419,6 +435,7 @@ function homeHtml() {
           <button class="btn" id="go-demo">${t("demo")}</button>
           <label class="btn">${t("import")}<input id="file" type="file" accept="video/*" hidden></label>
         </div>
+        ${parityNoteHtml()}
       </div>
       <aside class="projects-drawer island">
         <h2>${t("projects")}</h2>
@@ -897,7 +914,12 @@ function bind() {
     state.timelineZoom = Number(event.target.value);
     drawTimeline();
   });
-  document.querySelectorAll("[data-tab]").forEach((node) => node.onclick = () => { state.tab = node.dataset.tab; state.hudMenu = null; render(); });
+  document.querySelectorAll("[data-tab]").forEach((node) => node.onclick = () => {
+    DogSCMotion.press(node);
+    state.tab = node.dataset.tab;
+    state.hudMenu = null;
+    render();
+  });
   document.querySelectorAll("[data-frame-tab]").forEach((node) => node.onclick = () => { state.frameTab = node.dataset.frameTab; render(); });
   document.querySelectorAll("[data-bg-tab]").forEach((node) => node.onclick = () => {
     state.bgTab = node.dataset.bgTab;
@@ -1110,6 +1132,7 @@ function mountPreview() {
   const frame = document.querySelector("#canvas");
   frame.innerHTML = `<div class="content-box" id="content"><div class="content-shell" id="shell"><div class="chrome" id="chrome"></div><div class="camera" id="camera"><video id="video" src="/api/projects/${project.id}/media" playsinline></video><div class="cursor" id="cursor" hidden></div><div class="focus-dot" id="focus" hidden></div></div><div class="pip" id="pip" hidden>CAM</div></div></div>`;
   const video = document.querySelector("#video");
+  DogSCPreview.attach(video);
   video.onloadedmetadata = paintCanvas;
   document.querySelector("#content").onclick = (event) => {
     if (!state.selectedZoom) return;
@@ -1180,7 +1203,7 @@ function paintCanvas() {
     }
   }
   const located = Z.locateTimeline(project.clips, state.time);
-  if (located && Math.abs(video.currentTime - located.source) > 0.12 && !state.playing) video.currentTime = located.source;
+  if (located && !state.playing) DogSCPreview.seekCoalesced(located.source, false);
   const clock = document.querySelector("#clock");
   if (clock) clock.innerHTML = `${formatTime(state.time)}<em>/ ${formatTime(Z.duration(project.clips))}</em>`;
 }
@@ -1339,18 +1362,28 @@ function drawTimeline() {
   lanes.innerHTML = "";
   lanes.append(ruler);
   [clipLane, zoomLane, motionLane, mosaicLane, stickerLane].forEach((entry) => lanes.append(entry.wrap));
-  const seek = (event, lane) => {
+  const seek = (event, lane, exact = false) => {
     const rect = lane.getBoundingClientRect();
     let time = Z.clamp((event.clientX - rect.left) / rect.width, 0, 1) * duration;
     if (state.magnetic) time = Math.round(time * 10) / 10;
     state.time = time;
     state.playing = false;
+    const located = Z.locateTimeline(state.project.clips, state.time);
+    if (located) DogSCPreview.seekCoalesced(located.source, exact);
     paintCanvas();
     head.style.left = `${(state.time / duration) * 100}%`;
   };
   clipLane.lane.onpointerdown = (event) => {
     if (event.target.closest(".handle, .zoom, .motion, .mosaic, .sticker-clip")) return;
-    seek(event, clipLane.lane);
+    seek(event, clipLane.lane, false);
+    const move = (next) => seek(next, clipLane.lane, false);
+    const up = () => {
+      DogSCPreview.settle();
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
   };
   if (state.hoverPreview) {
     clipLane.lane.onpointermove = (event) => {
@@ -1358,10 +1391,12 @@ function drawTimeline() {
       const rect = clipLane.lane.getBoundingClientRect();
       const preview = Z.clamp((event.clientX - rect.left) / rect.width, 0, 1) * duration;
       const located = Z.locateTimeline(state.project.clips, preview);
-      const video = document.querySelector("#video");
-      if (video && located) video.currentTime = located.source;
+      if (located) DogSCPreview.seekCoalesced(located.source, false);
     };
-    clipLane.lane.onpointerleave = () => paintCanvas();
+    clipLane.lane.onpointerleave = () => {
+      DogSCPreview.settle();
+      paintCanvas();
+    };
   }
 }
 
@@ -1386,30 +1421,35 @@ function dragEdge(event, row, edge, duration, width) {
 function togglePlay() {
   state.playing = !state.playing;
   const video = document.querySelector("#video");
-  if (!state.playing) { video?.pause(); render(); return; }
+  if (!state.playing) {
+    video?.pause();
+    DogSCPreview.settle();
+    render();
+    return;
+  }
   render();
   const start = performance.now();
   const origin = state.time;
   const total = Z.duration(state.project.clips);
-  function frame(now) {
-    if (!state.playing) return;
+  const stop = DogSCPreview.run((now) => {
+    if (!state.playing) { stop(); return; }
     state.time = Math.min(origin + (now - start) / 1000, total);
     if (state.time >= total) {
       state.time = total;
       state.playing = false;
       video?.pause();
+      DogSCPreview.settle();
+      stop();
       render();
       return;
     }
     const locatedNow = Z.locateTimeline(state.project.clips, state.time);
-    if (video && locatedNow && Math.abs(video.currentTime - locatedNow.source) > 0.18) video.currentTime = locatedNow.source;
+    if (locatedNow) DogSCPreview.seekCoalesced(locatedNow.source, false);
     if (video && video.paused) video.play().catch(() => {});
     paintCanvas();
     const head = document.querySelector(".playhead");
     if (head) head.style.left = `${(state.time / total) * 100}%`;
-    requestAnimationFrame(frame);
-  }
-  requestAnimationFrame(frame);
+  });
 }
 
 async function exportProject() {

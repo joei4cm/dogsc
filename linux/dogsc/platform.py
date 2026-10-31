@@ -39,9 +39,12 @@ class Desktop:
     hints: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, object]:
+        from .parity import matrix
+
         payload = asdict(self)
         payload["tools"] = self.tools.as_dict()
         payload["backend_label"] = backend_label(self.backend, self.family, self.compositor)
+        payload["parity"] = matrix()
         return payload
 
 

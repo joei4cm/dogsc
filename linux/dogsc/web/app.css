@@ -181,6 +181,8 @@ input[type="color"] { width: 36px; height: 28px; border: 0; background: none; pa
   border: 0.5px solid var(--island-outline);
   border-radius: 999px;
   box-shadow: var(--contact-shadow), var(--soft-shadow), var(--ambient-shadow);
+  transition: transform 0.36s cubic-bezier(0.22, 0.9, 0.3, 1), width 0.5s cubic-bezier(0.22, 0.9, 0.3, 1);
+  will-change: transform;
 }
 .mode-wheel {
   display: inline-flex; align-items: center; gap: 8px;
@@ -210,10 +212,29 @@ input[type="color"] { width: 36px; height: 28px; border: 0; background: none; pa
 }
 .record-go.live .dot i { width: 12px; height: 12px; border-radius: 3px; }
 .recorder-popover {
-  position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%);
+  position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%) translateY(0) scale(1);
   width: min(320px, 86vw); padding: 12px; z-index: 6;
+  transform-origin: bottom center;
+  transition: transform 0.5s cubic-bezier(0.22, 0.9, 0.3, 1), opacity 0.18s ease-out;
+  will-change: transform, opacity;
 }
 .recorder-popover.narrow { width: 220px; }
+.rec-toggle, .mode-wheel, .record-go, .hud-btn, .play-btn, .tl-tool {
+  transition: background-color 0.15s ease-out, color 0.15s ease-out, transform 0.24s cubic-bezier(0.2, 1, 0.3, 1);
+}
+.rec-toggle:active, .hud-btn:active, .tl-tool:active, .play-btn:active {
+  transform: scale(0.96);
+}
+.stage-hud { will-change: transform; }
+@media (prefers-reduced-motion: reduce) {
+  .inspector-rail .rail-thumb,
+  .recorder-popover,
+  .recorder-capsule,
+  .rec-toggle, .mode-wheel, .record-go, .hud-btn, .play-btn, .tl-tool,
+  .inspector-rail button {
+    transition: none !important;
+  }
+}
 .recorder-popover .section-title { margin-bottom: 8px; }
 .choices { display: grid; gap: 6px; max-height: 220px; overflow: auto; }
 .choice {
@@ -230,6 +251,10 @@ input[type="color"] { width: 36px; height: 28px; border: 0; background: none; pa
   min-width: 72px; text-align: center; padding: 0 8px;
 }
 .note { color: var(--faint); font-size: 12px; line-height: 1.5; margin: 8px 0 0; }
+.parity-note {
+  display: inline-block; margin-top: 16px; padding: 8px 12px;
+  background: var(--well); border-radius: 10px; max-width: 420px;
+}
 
 /* —— Editor —— */
 .shell { height: 100%; display: grid; grid-template-rows: 52px 1fr; }
@@ -384,17 +409,28 @@ input[type="color"] { width: 36px; height: 28px; border: 0; background: none; pa
 .inspector-rail {
   display: flex; align-items: center; gap: 2px; padding: 8px 8px 6px;
   border-bottom: 0.5px solid var(--line);
-  overflow-x: auto;
+  overflow-x: auto; position: relative;
+}
+.inspector-rail .rail-thumb {
+  position: absolute; top: 8px; left: 4px; height: 44px; width: 44px;
+  border-radius: 999px; background: var(--platinum);
+  box-shadow: 0 4px 14px rgba(31, 31, 31, 0.18);
+  transition: transform 0.38s cubic-bezier(0.22, 1, 0.36, 1),
+              width 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none; z-index: 0; opacity: 0;
+  will-change: transform, width;
 }
 .inspector-rail button {
+  position: relative; z-index: 1;
   min-width: 44px; height: 44px; padding: 0 12px; border-radius: 999px;
   color: var(--muted); font-size: 13px; font-weight: 600;
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
   white-space: nowrap; flex: 0 0 auto;
+  transition: color 0.15s ease-out, padding 0.38s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.inspector-rail button:hover { background: var(--selection); color: var(--ink); }
+.inspector-rail button:hover { color: var(--ink); }
 .inspector-rail button.active {
-  background: var(--platinum); color: var(--on-accent);
+  background: transparent; color: var(--on-accent);
   padding: 0 16px 0 14px;
 }
 .inspector-rail button span { display: none; }
