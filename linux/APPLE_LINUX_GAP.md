@@ -20,7 +20,7 @@
 | G09 | Inspector matchedGeometry spring | Qt Spring / JS spring | **已落地** `DogSCMotion.settle` 积分拇指 |
 | G10 | 按压缩放 0.92/0.96 | 同 token | **已对齐** |
 | G11 | 岛阴影 r1.5/18/44 | 同 token | **已对齐 box-shadow** |
-| G13 | Stage dots 24 / 1.2 / α0.11 | 同 token | **已对齐** |
+| G13 | Stage dots 18 / r0.8 / α0.13 | 同 token | **已对齐** EditorStageDots |
 | G14 | Inspector 宽 384（340–480） | 可拖拽分栏 | **已落地** 拖拽 340–480 |
 | G15 | Timeline 高可拖 | 拖拽手柄 | **已落地** 180–420 |
 | G16 | Mockup 转盘 | WebGL/canvas 或 Qt PathView | **已落地** 横向 snap 转盘 + 剪影 |
@@ -39,6 +39,10 @@
 | G29 | 轨道显隐 | EditorTimelineTrackVisibility | **已落地** 时间线轨道菜单（运镜/3D/马赛克/贴图） |
 | G30 | Hover 时间徽章 | NativeTimelineHoverGuide | **已落地** 虚线 + 0:00.00 徽章 |
 | G31 | Option 切割引导 | Alt edit target | **已落地** Alt 虚线 + Alt-click 分割 |
+| G32 | Playhead 握柄 | NativeTimelinePlayhead knob 11×17 | **已落地** 胶囊握柄 + scrub 强调缩放 |
+| G33 | Mosaic 舞台缩放 | 四角控点 | **已落地** 选中后四角 resize |
+| G34 | Focus map 拖拽 | 运镜焦点 | **已落地** pointer drag |
+| G35 | 逐帧 / 跳秒 / 片段换序 | ←→ ⇧ , . [ ] | **已落地** |
 
 ## P2+ 与原生毕业路径
 
@@ -49,4 +53,4 @@
 | Ubuntu Wayland 采集 | **xdg-desktop-portal + PipeWire**（已有）/ GTK4+GStreamer | 门户契合度最高 |
 | 指针轨迹 | **libinput** / portal remote desktop | 浏览器拿不到 CGEvent 级流 |
 
-**结论：** Web Soft Silver 已收齐可复刻 P1（含 G09/G16/G17/G20 滞回、G23/G26、G28–G31）。P0 预览真相源 / continuous 圆角 / 浮动录制窗的**最优解**仍是 **Qt6-QML-Vulkan**（`linux/native/qt6`）；Web 用 `corner-shape: squircle` 作 continuous 过渡近似。
+**结论：** Web Soft Silver 已收齐可复刻 P1（含 G09/G13/G16/G17/G20 滞回、G23/G26、G28–G35）。P0 预览真相源 / continuous 圆角 / 浮动录制窗的**最优解**仍是 **Qt6-QML-Vulkan**（`linux/native/qt6`）；Web 用 `corner-shape: squircle` 作 continuous 过渡近似。

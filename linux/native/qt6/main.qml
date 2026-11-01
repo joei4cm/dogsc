@@ -45,18 +45,18 @@ ApplicationWindow {
             anchors.top: parent.top
             anchors.bottom: timeline.top
 
-            // Stage dots — Apple EditorWorkspaceGrid: stride 24, α0.11
+            // Stage dots — Apple EditorStageDots: spacing 18, r0.8, α0.13
             Canvas {
                 id: stageDots
                 anchors.fill: parent
                 onPaint: {
                     const ctx = getContext("2d")
                     ctx.clearRect(0, 0, width, height)
-                    ctx.fillStyle = "rgba(0,0,0,0.11)"
-                    for (let x = 12; x < width; x += 24)
-                        for (let y = 12; y < height; y += 24) {
+                    ctx.fillStyle = "rgba(0,0,0,0.13)"
+                    for (let x = 9; x < width; x += 18)
+                        for (let y = 9; y < height; y += 18) {
                             ctx.beginPath()
-                            ctx.arc(x, y, 0.6, 0, Math.PI * 2)
+                            ctx.arc(x, y, 0.8, 0, Math.PI * 2)
                             ctx.fill()
                         }
                 }
@@ -562,15 +562,29 @@ ApplicationWindow {
                 }
             }
 
-            // Playhead + hover guide badge + magnetic snap (G02 / G20 stubs)
-            Rectangle {
+            // Playhead line + capsule knob (NativeTimelinePlayheadView)
+            Item {
                 anchors.top: timelineBar.bottom
                 anchors.bottom: parent.bottom
                 x: parent.width * 0.28
                 width: 2
-                color: "#ff453b"
-                opacity: 0.9
-                z: 3
+                z: 5
+                Rectangle {
+                    anchors.fill: parent
+                    color: "#ff453b"
+                    opacity: 0.9
+                }
+                Rectangle {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top: parent.top
+                    anchors.topMargin: 1
+                    width: 11
+                    height: 17
+                    radius: 5.5
+                    color: "#ff453b"
+                    border.color: "#fdfdfe"
+                    border.width: 1.5
+                }
             }
             Item {
                 anchors.top: timelineBar.bottom

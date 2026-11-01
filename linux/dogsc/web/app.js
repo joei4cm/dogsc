@@ -769,7 +769,9 @@ function stageHudHtml(project) {
     <div class="shortcut-row"><span>${t("undo")}</span><kbd>${shortcutHint("undo")}</kbd></div>
     <div class="shortcut-row"><span>${t("redo")}</span><kbd>${shortcutHint("redo")}</kbd></div>
     <div class="shortcut-row"><span>${t("split")}</span><kbd>${shortcutHint("split")}</kbd></div>
-    <div class="shortcut-row"><span>${state.lang === "zh" ? "上一帧 / 下一帧" : "Step frames"}</span><kbd>← →</kbd></div>
+    <div class="shortcut-row"><span>${state.lang === "zh" ? "微调 / 跳秒" : "Nudge / Jump"}</span><kbd>← → · ⇧</kbd></div>
+    <div class="shortcut-row"><span>${state.lang === "zh" ? "逐帧" : "Frame step"}</span><kbd>, .</kbd></div>
+    <div class="shortcut-row"><span>${state.lang === "zh" ? "片段前后移" : "Reorder clip"}</span><kbd>[ ]</kbd></div>
     <div class="shortcut-row"><span>${state.lang === "zh" ? "删除选中" : "Delete"}</span><kbd>Delete</kbd></div>
     <div class="shortcut-row"><span>${state.lang === "zh" ? "关闭浮层" : "Dismiss"}</span><kbd>${shortcutHint("back")}</kbd></div>
   </aside>` : "";
@@ -1494,14 +1496,33 @@ function bind() {
   document.querySelectorAll("[data-cursor]").forEach((node) => node.onclick = () => meta({ cursor: { ...state.project.cursor, asset: node.dataset.cursor } }));
   document.querySelectorAll("[data-motion-mode]").forEach((node) => node.onclick = () => { state.motionMode = node.dataset.motionMode; render(); });
   document.querySelectorAll("[data-motion-drive]").forEach((node) => node.onclick = () => { state.motionDrive = node.dataset.motionDrive; render(); });
-  document.querySelector("#focus-map")?.addEventListener("click", (event) => {
-    if (!state.selectedZoom) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    updateZoom({
-      focus_x: Z.clamp((event.clientX - rect.left) / rect.width, 0, 1),
-      focus_y: Z.clamp((event.clientY - rect.top) / rect.height, 0, 1),
-    });
-  });
+  const focusMap = document.querySelector("#focus-map");
+  if (focusMap) {
+    const setFocus = (event) => {
+      if (!state.selectedZoom) return;
+      const rect = focusMap.getBoundingClientRect();
+      const focus_x = Z.clamp((event.clientX - rect.left) / rect.width, 0, 1);
+      const focus_y = Z.clamp((event.clientY - rect.top) / rect.height, 0, 1);
+      const reticle = focusMap.querySelector(".reticle");
+      if (reticle) {
+        reticle.style.left = `${focus_x * 100}%`;
+        reticle.style.top = `${focus_y * 100}%`;
+      }
+      return { focus_x, focus_y };
+    };
+    focusMap.onpointerdown = (event) => {
+      event.preventDefault();
+      let last = setFocus(event);
+      const move = (next) => { last = setFocus(next); };
+      const up = async () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        if (last) await updateZoom(last);
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+    };
+  }
   bindInspectorFields();
 }
 
@@ -1895,7 +1916,9 @@ function paintStageOverlays() {
     parts.push(
       `<div class="overlay-mosaic${selected ? " selected" : ""}" data-overlay="mosaic" data-id="${item.id}" `
       + `style="left:${item.x * 100}%;top:${item.y * 100}%;width:${item.width * 100}%;height:${item.height * 100}%;`
-      + `border-radius:${radius}px;backdrop-filter:blur(${blur}px);background:rgba(20,22,28,${alpha})"></div>`
+      + `border-radius:${radius}px;backdrop-filter:blur(${blur}px);background:rgba(20,22,28,${alpha})">`
+      + `<i class="overlay-handle" data-handle="nw"></i><i class="overlay-handle" data-handle="ne"></i>`
+      + `<i class="overlay-handle" data-handle="se"></i><i class="overlay-handle" data-handle="sw"></i></div>`
     );
   }
   for (const item of (state.project.stickers || []).map(absoluteItem)) {
@@ -1918,6 +1941,7 @@ function bindStageDragDelegation() {
   const pip = document.querySelector("#pip");
   if (!camera || !host) return;
   host.onpointerdown = (event) => {
+    const handle = event.target.closest(".overlay-handle");
     const node = event.target.closest("[data-overlay]");
     if (!node || state.cropping || state.playing) return;
     event.preventDefault();
@@ -1933,10 +1957,64 @@ function bindStageDragDelegation() {
       state.selectedMosaic = null;
     }
     const box = camera.getBoundingClientRect();
-    const originX = kind === "mosaic" ? Number(state.selectedMosaic?.x || 0) : Number(state.selectedSticker?.x || 0);
-    const originY = kind === "mosaic" ? Number(state.selectedMosaic?.y || 0) : Number(state.selectedSticker?.y || 0);
     const startX = event.clientX;
     const startY = event.clientY;
+    if (handle && kind === "mosaic" && state.selectedMosaic) {
+      const corner = handle.dataset.handle;
+      const origin = {
+        x: Number(state.selectedMosaic.x || 0),
+        y: Number(state.selectedMosaic.y || 0),
+        width: Number(state.selectedMosaic.width || 0.3),
+        height: Number(state.selectedMosaic.height || 0.25),
+      };
+      const move = (next) => {
+        const dx = (next.clientX - startX) / Math.max(box.width, 1);
+        const dy = (next.clientY - startY) / Math.max(box.height, 1);
+        let left = origin.x;
+        let top = origin.y;
+        let right = origin.x + origin.width;
+        let bottom = origin.y + origin.height;
+        if (corner.includes("w")) left = origin.x + dx;
+        if (corner.includes("e")) right = origin.x + origin.width + dx;
+        if (corner.includes("n")) top = origin.y + dy;
+        if (corner.includes("s")) bottom = origin.y + origin.height + dy;
+        left = Z.clamp(left, 0, 0.95);
+        top = Z.clamp(top, 0, 0.95);
+        right = Z.clamp(right, left + 0.05, 1);
+        bottom = Z.clamp(bottom, top + 0.05, 1);
+        state.selectedMosaic = {
+          ...state.selectedMosaic,
+          x: left,
+          y: top,
+          width: right - left,
+          height: bottom - top,
+        };
+        Object.assign(node.style, {
+          left: `${left * 100}%`,
+          top: `${top * 100}%`,
+          width: `${(right - left) * 100}%`,
+          height: `${(bottom - top) * 100}%`,
+        });
+      };
+      const up = async () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        try {
+          await mutate(`/api/projects/${state.project.id}/mosaic-update`, {
+            id: state.selectedMosaic.id,
+            x: state.selectedMosaic.x,
+            y: state.selectedMosaic.y,
+            width: state.selectedMosaic.width,
+            height: state.selectedMosaic.height,
+          });
+        } catch (error) { toast(error.message); }
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+      return;
+    }
+    const originX = kind === "mosaic" ? Number(state.selectedMosaic?.x || 0) : Number(state.selectedSticker?.x || 0);
+    const originY = kind === "mosaic" ? Number(state.selectedMosaic?.y || 0) : Number(state.selectedSticker?.y || 0);
     const move = (next) => {
       const dx = (next.clientX - startX) / Math.max(box.width, 1);
       const dy = (next.clientY - startY) / Math.max(box.height, 1);
@@ -2539,12 +2617,14 @@ function drawTimeline() {
       mutate(`/api/projects/${state.project.id}/split`, { time });
       return;
     }
+    head.classList.add("is-emphasized");
     seek(event, clipLane.lane, false);
     const move = (next) => seek(next, clipLane.lane, false);
     const up = () => {
       magneticSession.reset();
       state.snapGuide = null;
       document.querySelector(".snap-guide")?.remove();
+      head.classList.remove("is-emphasized");
       DogSCPreview.settle(state.previewQuality);
       const located = Z.locateTimeline(state.project.clips, state.time);
       if (located) DogSCPreview.seekCoalesced(located.source, true, state.previewQuality);
@@ -2712,17 +2792,37 @@ window.addEventListener("keydown", (event) => {
     event.preventDefault();
     if (!state.cropping) openExportSheet();
   }
-  if (event.key === "ArrowRight" && state.view === "editor") {
+  if ((event.key === "ArrowRight" || event.key === "ArrowLeft") && state.view === "editor") {
+    event.preventDefault();
     state.playing = false;
     updatePlayButton();
-    state.time = Math.min(state.time + 0.1, Z.duration(state.project.clips));
+    const step = event.shiftKey ? 1 : (event.altKey ? 1 / 30 : 0.1);
+    state.time = event.key === "ArrowRight"
+      ? Math.min(state.time + step, Z.duration(state.project.clips))
+      : Math.max(state.time - step, 0);
     paintCanvas();
+    syncTransport();
   }
-  if (event.key === "ArrowLeft" && state.view === "editor") {
+  if ((event.key === "," || event.key === ".") && state.view === "editor") {
+    event.preventDefault();
     state.playing = false;
     updatePlayButton();
-    state.time = Math.max(state.time - 0.1, 0);
+    const frame = 1 / 30;
+    state.time = event.key === "."
+      ? Math.min(state.time + frame, Z.duration(state.project.clips))
+      : Math.max(state.time - frame, 0);
     paintCanvas();
+    syncTransport();
+  }
+  if ((event.key === "[" || event.key === "]") && state.view === "editor" && !event.metaKey && !event.ctrlKey) {
+    const clip = Z.locateTimeline(state.project.clips, state.time)?.clip;
+    if (clip) {
+      event.preventDefault();
+      mutate(`/api/projects/${state.project.id}/move`, {
+        id: clip.id,
+        direction: event.key === "]" ? 1 : -1,
+      });
+    }
   }
   if ((event.key === "Delete" || event.key === "Backspace") && state.view === "editor" && state.selectedMarker) {
     event.preventDefault();
