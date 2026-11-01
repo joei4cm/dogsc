@@ -1963,12 +1963,14 @@ function drawTimeline() {
         const to = Math.max(Math.ceil((srcOut / mediaDuration) * peaks.length), from + 1);
         const slice = peaks.slice(from, to);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = "rgba(133,209,66,0.75)";
+        ctx.fillStyle = "rgba(133,209,66,0.82)";
         const mid = canvas.height / 2;
+        const peakMax = Math.max(...slice, 0.08);
         slice.forEach((peak, index) => {
           const x = (index / Math.max(slice.length - 1, 1)) * canvas.width;
-          const h = Math.max(peak * (canvas.height * 0.9), 1.5);
-          ctx.fillRect(x, mid - h / 2, Math.max(canvas.width / slice.length - 0.6, 1), h);
+          const normalized = Math.min(peak / peakMax, 1);
+          const h = Math.max(normalized * (canvas.height * 0.92), 1.8);
+          ctx.fillRect(x, mid - h / 2, Math.max(canvas.width / slice.length - 0.5, 1.2), h);
         });
       }
     } else {
