@@ -1745,12 +1745,25 @@ function paintStageOverlays() {
     if (state.time < item.start || state.time > item.end) continue;
     const intensity = Number(item.intensity || 0.55);
     const blur = 4 + intensity * 18;
-    parts.push(`<div class="overlay-mosaic ${item.id === state.selectedMosaic?.id ? "selected" : ""}" data-overlay="mosaic" data-id="${item.id}" style="left:${item.x * 100}%;top:${item.y * 100}%;width:${item.width * 100}%;height:${item.height * 100}%;border-radius:${(item.corner_radius || 0.08) * 40}px;backdrop-filter:blur(${blur}px);background:rgba(20,22,28,${0.12 + intensity * 0.25)}"></div>`);
+    const selected = state.selectedMosaic && item.id === state.selectedMosaic.id;
+    const alpha = (0.12 + intensity * 0.25).toFixed(3);
+    const radius = ((item.corner_radius || 0.08) * 40).toFixed(1);
+    parts.push(
+      `<div class="overlay-mosaic${selected ? " selected" : ""}" data-overlay="mosaic" data-id="${item.id}" `
+      + `style="left:${item.x * 100}%;top:${item.y * 100}%;width:${item.width * 100}%;height:${item.height * 100}%;`
+      + `border-radius:${radius}px;backdrop-filter:blur(${blur}px);background:rgba(20,22,28,${alpha})"></div>`
+    );
   }
   for (const item of (state.project.stickers || []).map(absoluteItem)) {
     if (state.time < item.start || state.time > item.end) continue;
-    const selected = item.id === state.selectedSticker?.id;
-    parts.push(`<div class="overlay-sticker ${selected ? "selected" : ""}" data-overlay="sticker" data-id="${item.id}" style="left:${item.x * 100}%;top:${item.y * 100}%;width:${item.width * 100}%;opacity:${item.opacity ?? 1};transform:translate(-50%,-50%) rotate(${item.rotation || 0}deg);border-radius:${item.corner_radius || 18}px"><img src="/api/projects/${state.project.id}/${escapeHtml(item.path)}" alt="" draggable="false"></div>`);
+    const selected = state.selectedSticker && item.id === state.selectedSticker.id;
+    const opacity = item.opacity == null ? 1 : item.opacity;
+    parts.push(
+      `<div class="overlay-sticker${selected ? " selected" : ""}" data-overlay="sticker" data-id="${item.id}" `
+      + `style="left:${item.x * 100}%;top:${item.y * 100}%;width:${item.width * 100}%;opacity:${opacity};`
+      + `transform:translate(-50%,-50%) rotate(${item.rotation || 0}deg);border-radius:${item.corner_radius || 18}px">`
+      + `<img src="/api/projects/${state.project.id}/${escapeHtml(item.path)}" alt="" draggable="false"></div>`
+    );
   }
   host.innerHTML = parts.join("");
 }
