@@ -115,12 +115,15 @@ const DogSCMotion = (() => {
     );
   }
 
-  function morphOpen(node, open) {
+  function morphOpen(node, open, baseTransform = "") {
     if (!node) return;
+    const prefix = baseTransform ? `${baseTransform} ` : "";
     node.style.transition = cssTransition("morph");
     node.dataset.open = open ? "1" : "0";
     node.style.opacity = open ? "1" : "0";
-    node.style.transform = open ? "translateY(0) scale(1)" : "translateY(8px) scale(0.96)";
+    node.style.transform = open
+      ? `${prefix}translateY(0) scale(1)`
+      : `${prefix}translateY(8px) scale(0.96)`;
     node.style.pointerEvents = open ? "auto" : "none";
   }
 

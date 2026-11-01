@@ -270,12 +270,49 @@ const OPENING_LABELS = {
 };
 
 function t(key) { return STR[state.lang][key] || key; }
+function modKey() {
+  return /Mac|iPhone|iPad/.test(navigator.platform || "") ? "⌘" : "Ctrl";
+}
+function shortcutHint(action) {
+  const mod = modKey();
+  const map = {
+    undo: `${mod}+Z`,
+    redo: `${mod}+Shift+Z`,
+    play: "Space",
+    split: "S",
+    back: "Esc",
+  };
+  return map[action] || "";
+}
 function toast(message) {
   const node = document.querySelector("#toast");
   node.textContent = message;
   node.classList.add("show");
   clearTimeout(toast._timer);
   toast._timer = setTimeout(() => node.classList.remove("show"), 2800);
+}
+function syncTransport() {
+  if (!state.project) return;
+  const total = Math.max(Z.duration(state.project.clips), 0.1);
+  const clock = document.querySelector("#clock");
+  if (clock) clock.innerHTML = `${formatTime(state.time)} <em>/ ${formatTime(Z.duration(state.project.clips))}</em>`;
+  const head = document.querySelector(".playhead");
+  if (head) head.style.left = `${(state.time / total) * 100}%`;
+}
+function closeFloatingUI() {
+  let changed = false;
+  if (state.recorderPopover) { state.recorderPopover = null; changed = true; }
+  if (state.hudMenu) { state.hudMenu = null; changed = true; }
+  if (state.cropping) { state.cropping = false; changed = true; }
+  return changed;
+}
+function updatePlayButton() {
+  const playBtn = document.querySelector("#play");
+  if (!playBtn) return;
+  playBtn.classList.toggle("playing", state.playing);
+  playBtn.title = `${state.playing ? t("pause") : t("playing")} · ${shortcutHint("play")}`;
+  playBtn.setAttribute("aria-pressed", state.playing ? "true" : "false");
+  playBtn.innerHTML = state.playing ? ICONS.pause : ICONS.play;
 }
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
@@ -436,11 +473,11 @@ function recorderCapsuleHtml() {
       <button class="mode-wheel" id="mode-wheel" title="${sourceLabel(source)}">
         ${ICONS[source] || ICONS.display}<span>${sourceLabel(source)}</span><span class="chev">⇅</span>
       </button>
-      <button class="rec-toggle ${state.record.mic ? "on" : ""}" data-pop="mic" title="${t("mic")}">${state.record.mic ? ICONS.mic : ICONS.micOff}</button>
-      <button class="rec-toggle ${state.record.camera ? "on" : ""}" data-pop="camera" title="${t("camera")}">${state.record.camera ? ICONS.cam : ICONS.camOff}</button>
-      <button class="rec-toggle ${state.record.system ? "on" : ""}" data-pop="system" title="${t("system")}">${state.record.system ? ICONS.speaker : ICONS.speakerOff}</button>
-      <button class="rec-toggle" data-pop="more" title="${t("settings")}">${ICONS.more}</button>
-      <button class="record-go" id="start-record" title="${t("start")}"><span class="dot"><i></i></span></button>
+      <button class="rec-toggle ${state.record.mic ? "on" : ""}" data-pop="mic" title="${t("mic")}" aria-pressed="${state.record.mic}" aria-expanded="${state.recorderPopover === "mic"}">${state.record.mic ? ICONS.mic : ICONS.micOff}</button>
+      <button class="rec-toggle ${state.record.camera ? "on" : ""}" data-pop="camera" title="${t("camera")}" aria-pressed="${state.record.camera}" aria-expanded="${state.recorderPopover === "camera"}">${state.record.camera ? ICONS.cam : ICONS.camOff}</button>
+      <button class="rec-toggle ${state.record.system ? "on" : ""}" data-pop="system" title="${t("system")}" aria-pressed="${state.record.system}" aria-expanded="${state.recorderPopover === "system"}">${state.record.system ? ICONS.speaker : ICONS.speakerOff}</button>
+      <button class="rec-toggle" data-pop="more" title="${t("settings")}" aria-expanded="${state.recorderPopover === "more"}">${ICONS.more}</button>
+      <button class="record-go" id="start-record" title="${t("start")}" aria-label="${t("start")}"><span class="dot"><i></i></span></button>
     </div>
   </div>`;
 }
@@ -515,7 +552,16 @@ function stageHudHtml(project) {
     <button class="active">${state.lang === "zh" ? "完整画质" : "Full quality"}</button>
     <button>${state.lang === "zh" ? "流畅预览" : "Fast preview"}</button>
   </div>` : "";
-  return `<div class="stage-hud" id="stage-hud">
+  const shortcutsPanel = state.hudMenu === "shortcuts" ? `<aside class="shortcuts-panel island" id="shortcuts-panel" role="dialog" aria-label="${state.lang === "zh" ? "快捷键" : "Shortcuts"}">
+    <div class="section-title">${state.lang === "zh" ? "快捷键" : "Shortcuts"}</div>
+    <div class="shortcut-row"><span>${state.lang === "zh" ? "播放 / 暂停" : "Play / Pause"}</span><kbd>${shortcutHint("play")}</kbd></div>
+    <div class="shortcut-row"><span>${t("undo")}</span><kbd>${shortcutHint("undo")}</kbd></div>
+    <div class="shortcut-row"><span>${t("redo")}</span><kbd>${shortcutHint("redo")}</kbd></div>
+    <div class="shortcut-row"><span>${t("split")}</span><kbd>${shortcutHint("split")}</kbd></div>
+    <div class="shortcut-row"><span>${state.lang === "zh" ? "上一帧 / 下一帧" : "Step frames"}</span><kbd>← →</kbd></div>
+    <div class="shortcut-row"><span>${state.lang === "zh" ? "关闭浮层" : "Dismiss"}</span><kbd>${shortcutHint("back")}</kbd></div>
+  </aside>` : "";
+  return `${shortcutsPanel}<div class="stage-hud" id="stage-hud">
     <div style="position:relative">
       <button class="hud-btn" id="aspect-btn">${project.canvas.aspect || "16:9"}</button>
       ${aspectMenu}
@@ -530,17 +576,17 @@ function stageHudHtml(project) {
       ${previewMenu}
     </div>
     <div class="hud-divider"></div>
-    <button class="hud-btn" id="step-back" title="上一帧">${ICONS.prev}</button>
-    <button class="play-btn ${state.playing ? "playing" : ""}" id="play" title="${state.playing ? t("pause") : t("playing")}">${state.playing ? ICONS.pause : ICONS.play}</button>
-    <button class="hud-btn" id="step-forward" title="下一帧">${ICONS.next}</button>
+    <button class="hud-btn" id="step-back" title="${state.lang === "zh" ? "上一帧 · ←" : "Previous frame · ←"}">${ICONS.prev}</button>
+    <button class="play-btn ${state.playing ? "playing" : ""}" id="play" title="${state.playing ? t("pause") : t("playing")} · ${shortcutHint("play")}" aria-pressed="${state.playing}">${state.playing ? ICONS.pause : ICONS.play}</button>
+    <button class="hud-btn" id="step-forward" title="${state.lang === "zh" ? "下一帧 · →" : "Next frame · →"}">${ICONS.next}</button>
     <span class="hud-time" id="clock">${formatTime(state.time)} <em>/ ${formatTime(Z.duration(project.clips))}</em></span>
   </div>`;
 }
 
 function timelineBarHtml() {
   return `<div class="timeline-bar">
-    <button class="tl-tool" id="split" title="${t("split")}">${ICONS.scissors}</button>
-    <button class="tl-tool" id="delete-selection" title="${t("delete")}">${ICONS.trash}</button>
+    <button class="tl-tool" id="split" title="${t("split")} · ${shortcutHint("split")}">${ICONS.scissors}</button>
+    <button class="tl-tool" id="delete-selection" title="${t("delete")} · Delete">${ICONS.trash}</button>
     <button class="tl-tool" id="restore-cuts" title="${t("restoreCuts")}">${ICONS.restore}</button>
     <button class="tl-tool" id="add-edit-marker" title="${t("marker")}">${ICONS.marker}</button>
     <div class="tl-group" style="margin-left:8px">
@@ -548,8 +594,8 @@ function timelineBarHtml() {
       <button id="mode-wave" class="${state.timelineMode === "waveform" ? "active" : ""}">${ICONS.wave}${t("waveform")}</button>
     </div>
     <div class="spacer"></div>
-    <button class="tl-tool ${state.magnetic ? "active" : ""}" id="magnetic" title="${t("magnetic")}">${ICONS.magnet}</button>
-    <button class="tl-tool ${state.hoverPreview ? "active" : ""}" id="hover-preview" title="${t("hoverPrev")}">${ICONS.eye}</button>
+    <button class="tl-tool ${state.magnetic ? "active" : ""}" id="magnetic" title="${t("magnetic")}" aria-pressed="${state.magnetic}">${ICONS.magnet}</button>
+    <button class="tl-tool ${state.hoverPreview ? "active" : ""}" id="hover-preview" title="${t("hoverPrev")}" aria-pressed="${state.hoverPreview}">${ICONS.eye}</button>
     <button class="tl-tool" id="fit-all" title="${t("fitAll")}">${ICONS.fit}</button>
     <div class="tl-zoom">
       <input id="timeline-zoom" type="range" min="1" max="6" step="0.1" value="${state.timelineZoom}">
@@ -566,12 +612,12 @@ function editorHtml() {
         <input class="title" id="project-name" value="${escapeHtml(project.name)}">
         <span class="saved">${ICONS.check}<span>${t("saved")}</span></span>
         <span class="toolbar-divider"></span>
-        <button class="btn icon" id="undo" title="${t("undo")}">${ICONS.undo}</button>
-        <button class="btn icon" id="redo" title="${t("redo")}">${ICONS.redo}</button>
+        <button class="btn icon" id="undo" title="${t("undo")} · ${shortcutHint("undo")}">${ICONS.undo}</button>
+        <button class="btn icon" id="redo" title="${t("redo")} · ${shortcutHint("redo")}">${ICONS.redo}</button>
       </div>
       <div class="top-trailing">
         <button class="btn icon" id="lang" title="${t("lang")}">${t("lang") === "English" ? "EN" : "中"}</button>
-        <button class="btn icon" id="settings-btn" title="${t("settings")}">${ICONS.gear}</button>
+        <button class="btn icon" id="settings-btn" title="${state.lang === "zh" ? "快捷键" : "Shortcuts"}" aria-expanded="${state.hudMenu === "shortcuts"}">${ICONS.gear}</button>
         <button class="btn icon danger" id="delete-project" title="${t("delete")}">${ICONS.trash}</button>
         <span class="toolbar-divider"></span>
         <button class="btn primary export-btn" id="export">${ICONS.share}<span>${t("export")}</span></button>
@@ -818,9 +864,12 @@ function bindHome() {
   });
   document.querySelectorAll("[data-open]").forEach((node) => node.onclick = () => openProject(node.dataset.open));
   document.querySelectorAll("[data-delete]").forEach((node) => node.onclick = async () => {
-    if (!confirm(state.lang === "zh" ? "删除这个项目？" : "Delete this project?")) return;
+    const target = state.projects.find((item) => item.id === node.dataset.delete);
+    const name = target?.name || (state.lang === "zh" ? "未命名" : "Untitled");
+    if (!confirm(state.lang === "zh" ? `删除「${name}」？此操作不可恢复。` : `Delete “${name}”? This can’t be undone.`)) return;
     await api(`/api/projects/${node.dataset.delete}`, { method: "DELETE" });
     state.projects = await api("/api/projects");
+    toast(state.lang === "zh" ? `已删除「${name}」` : `Deleted “${name}”`);
     render();
   });
   document.querySelectorAll("#go-demo").forEach((node) => node.addEventListener("click", async (event) => {
@@ -894,6 +943,20 @@ function bindHome() {
   });
   document.querySelector("#stop-record")?.addEventListener("click", stopRecording);
   document.querySelector("#add-marker")?.addEventListener("click", () => api("/api/record/marker", { method: "POST", body: {} }).catch((error) => toast(error.message)));
+  const pop = document.querySelector("#rec-pop");
+  if (pop) {
+    pop.style.transition = DogSCMotion.cssTransition("morph");
+    pop.style.opacity = "0";
+    pop.style.transform = "translateX(-50%) translateY(8px) scale(0.96)";
+    pop.style.pointerEvents = "none";
+    requestAnimationFrame(() => {
+      pop.style.opacity = "1";
+      pop.style.transform = "translateX(-50%) translateY(0) scale(1)";
+      pop.style.pointerEvents = "auto";
+    });
+    const focusable = pop.querySelector("button.choice, button[data-source], input, select, button");
+    focusable?.focus?.();
+  }
   document.addEventListener("pointerdown", dismissRecorderPopover, { once: true });
 }
 
@@ -904,6 +967,16 @@ function dismissRecorderPopover(event) {
     return;
   }
   state.recorderPopover = null;
+  render();
+}
+
+function dismissHudMenu(event) {
+  if (!state.hudMenu) return;
+  if (event.target.closest("#shortcuts-panel, #settings-btn, .hud-menu, #aspect-btn, #add-btn, #preview-btn")) {
+    document.addEventListener("pointerdown", dismissHudMenu, { once: true });
+    return;
+  }
+  state.hudMenu = null;
   render();
 }
 
@@ -925,18 +998,21 @@ function bind() {
     loadSources().then(render);
   };
   document.querySelector("#delete-project")?.addEventListener("click", async () => {
-    if (!confirm(state.lang === "zh" ? "删除当前项目？" : "Delete this project?")) return;
+    const name = state.project?.name || (state.lang === "zh" ? "未命名" : "Untitled");
+    if (!confirm(state.lang === "zh" ? `删除「${name}」？此操作不可恢复。` : `Delete “${name}”? This can’t be undone.`)) return;
     await api(`/api/projects/${state.project.id}`, { method: "DELETE" });
     state.project = null;
     state.view = "home";
+    state.playing = false;
     state.projects = await api("/api/projects");
+    toast(state.lang === "zh" ? `已删除「${name}」` : `Deleted “${name}”`);
     render();
   });
   document.querySelector("#settings-btn")?.addEventListener("click", () => {
-    state.lang = state.lang === "zh" ? "en" : "zh";
-    localStorage.setItem("dogsc-lang", state.lang);
+    state.hudMenu = state.hudMenu === "shortcuts" ? null : "shortcuts";
     render();
   });
+  if (state.hudMenu) document.addEventListener("pointerdown", dismissHudMenu, { once: true });
   document.querySelector("#undo").onclick = () => mutate(`/api/projects/${state.project.id}/undo`, {});
   document.querySelector("#redo").onclick = () => mutate(`/api/projects/${state.project.id}/redo`, {});
   document.querySelector("#export").onclick = exportProject;
@@ -955,8 +1031,18 @@ function bind() {
     } catch (error) { toast(error.message); }
   });
   document.querySelector("#play").onclick = togglePlay;
-  document.querySelector("#step-back").onclick = () => { state.time = Math.max(state.time - 0.1, 0); paintCanvas(); };
-  document.querySelector("#step-forward").onclick = () => { state.time = Math.min(state.time + 0.1, Z.duration(state.project.clips)); paintCanvas(); };
+  document.querySelector("#step-back").onclick = () => {
+    state.playing = false;
+    updatePlayButton();
+    state.time = Math.max(state.time - 0.1, 0);
+    paintCanvas();
+  };
+  document.querySelector("#step-forward").onclick = () => {
+    state.playing = false;
+    updatePlayButton();
+    state.time = Math.min(state.time + 0.1, Z.duration(state.project.clips));
+    paintCanvas();
+  };
   document.querySelector("#split").onclick = () => mutate(`/api/projects/${state.project.id}/split`, { time: state.time });
   document.querySelector("#delete-selection")?.addEventListener("click", () => {
     if (state.selectedZoom) {
@@ -1291,8 +1377,7 @@ function paintCanvas() {
   }
   const located = Z.locateTimeline(project.clips, state.time);
   if (located && !state.playing) DogSCPreview.seekCoalesced(located.source, false);
-  const clock = document.querySelector("#clock");
-  if (clock) clock.innerHTML = `${formatTime(state.time)} <em>/ ${formatTime(Z.duration(project.clips))}</em>`;
+  syncTransport();
 }
 
 function backgroundCss(canvas) {
@@ -1410,7 +1495,8 @@ function drawTimeline() {
     node.onclick = () => { state.selectedZoom = zoom.id; state.tab = "motion"; state.motionMode = "zoom"; render(); };
     lane.append(node);
   });
-  const motionLane = makeLane("3D", (state.project.screen_motions || []).map(absoluteItem), (lane, item) => {
+  const motions = (state.project.screen_motions || []).map(absoluteItem);
+  const motionLane = makeLane("3D", motions, (lane, item) => {
     const node = document.createElement("div");
     node.className = `motion${item.id === state.selectedMotion ? " selected" : ""}`;
     const end = Number(item.end) + Number(item.exit || 0);
@@ -1419,7 +1505,14 @@ function drawTimeline() {
     node.onclick = () => { state.selectedMotion = item.id; state.tab = "motion"; state.motionMode = "tilt"; render(); };
     lane.append(node);
   });
-  const mosaicLane = makeLane("马赛克", (state.project.mosaics || []).map(absoluteItem), (lane, item) => {
+  if (!motions.length) {
+    const hint = document.createElement("div");
+    hint.className = "lane-empty";
+    hint.textContent = state.lang === "zh" ? "空 · 可在预览栏加入 3D" : "Empty · add 3D from preview";
+    motionLane.lane.append(hint);
+  }
+  const mosaics = (state.project.mosaics || []).map(absoluteItem);
+  const mosaicLane = makeLane("马赛克", mosaics, (lane, item) => {
     const node = document.createElement("div");
     node.className = `mosaic${item.id === state.selectedMosaic?.id ? " selected" : ""}`;
     node.style.left = `${(item.start / duration) * 100}%`;
@@ -1427,13 +1520,26 @@ function drawTimeline() {
     node.onclick = () => { state.selectedMosaic = item; state.tab = "motion"; render(); };
     lane.append(node);
   });
-  const stickerLane = makeLane("贴图", (state.project.stickers || []).map(absoluteItem), (lane, item) => {
+  if (!mosaics.length) {
+    const hint = document.createElement("div");
+    hint.className = "lane-empty";
+    hint.textContent = state.lang === "zh" ? "空" : "Empty";
+    mosaicLane.lane.append(hint);
+  }
+  const stickers = (state.project.stickers || []).map(absoluteItem);
+  const stickerLane = makeLane("贴图", stickers, (lane, item) => {
     const node = document.createElement("div");
     node.className = "sticker-clip";
     node.style.left = `${(item.start / duration) * 100}%`;
     node.style.width = `${Math.max((item.end - item.start) / duration * 100, 1)}%`;
     lane.append(node);
   });
+  if (!stickers.length) {
+    const hint = document.createElement("div");
+    hint.className = "lane-empty";
+    hint.textContent = state.lang === "zh" ? "空" : "Empty";
+    stickerLane.lane.append(hint);
+  }
   const head = document.createElement("div");
   head.className = "playhead";
   head.style.left = `${(state.time / duration) * 100}%`;
@@ -1511,13 +1617,15 @@ function togglePlay() {
   if (!state.playing) {
     video?.pause();
     DogSCPreview.settle();
-    render();
+    updatePlayButton();
+    syncTransport();
     return;
   }
-  render();
+  if (state.hudMenu) { state.hudMenu = null; document.querySelector("#shortcuts-panel")?.remove(); document.querySelectorAll(".hud-menu").forEach((node) => node.remove()); }
+  updatePlayButton();
   const start = performance.now();
   const origin = state.time;
-  const total = Z.duration(state.project.clips);
+  const total = Math.max(Z.duration(state.project.clips), 0.001);
   const stop = DogSCPreview.run((now) => {
     if (!state.playing) { stop(); return; }
     state.time = Math.min(origin + (now - start) / 1000, total);
@@ -1527,15 +1635,14 @@ function togglePlay() {
       video?.pause();
       DogSCPreview.settle();
       stop();
-      render();
+      updatePlayButton();
+      paintCanvas();
       return;
     }
     const locatedNow = Z.locateTimeline(state.project.clips, state.time);
     if (locatedNow) DogSCPreview.seekCoalesced(locatedNow.source, false);
     if (video && video.paused) video.play().catch(() => {});
     paintCanvas();
-    const head = document.querySelector(".playhead");
-    if (head) head.style.left = `${(state.time / total) * 100}%`;
   });
 }
 
@@ -1574,14 +1681,33 @@ function aspectRatio(aspect, width, height) {
 
 window.addEventListener("keydown", (event) => {
   if (event.target.matches("input, select, textarea")) return;
+  if (event.key === "Escape") {
+    if (closeFloatingUI()) {
+      event.preventDefault();
+      render();
+    }
+    return;
+  }
   if (event.code === "Space" && state.view === "editor") { event.preventDefault(); togglePlay(); }
-  if (event.key === "s" && state.view === "editor") mutate(`/api/projects/${state.project.id}/split`, { time: state.time });
-  if ((event.metaKey || event.ctrlKey) && event.key === "z" && state.view === "editor") {
+  if (event.key === "s" && state.view === "editor" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    mutate(`/api/projects/${state.project.id}/split`, { time: state.time });
+  }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z" && state.view === "editor") {
     event.preventDefault();
     mutate(`/api/projects/${state.project.id}/${event.shiftKey ? "redo" : "undo"}`, {});
   }
-  if (event.key === "ArrowRight" && state.view === "editor") { state.time = Math.min(state.time + 0.1, Z.duration(state.project.clips)); paintCanvas(); }
-  if (event.key === "ArrowLeft" && state.view === "editor") { state.time = Math.max(state.time - 0.1, 0); paintCanvas(); }
+  if (event.key === "ArrowRight" && state.view === "editor") {
+    state.playing = false;
+    updatePlayButton();
+    state.time = Math.min(state.time + 0.1, Z.duration(state.project.clips));
+    paintCanvas();
+  }
+  if (event.key === "ArrowLeft" && state.view === "editor") {
+    state.playing = false;
+    updatePlayButton();
+    state.time = Math.max(state.time - 0.1, 0);
+    paintCanvas();
+  }
 });
 
 async function boot() {
