@@ -352,7 +352,10 @@ function render() {
       const rail = document.querySelector(".inspector-rail");
       const active = rail?.querySelector("button.active");
       DogSCMotion.slideThumb(rail, active);
+      DogSCMotion.syncSegments();
     });
+  } else {
+    requestAnimationFrame(() => DogSCMotion.syncSegments());
   }
   const pill = document.querySelector("#platform-pill");
   if (pill && state.env) pill.textContent = `${state.env.os_name?.split(" ")[0] || "Linux"} · ${state.env.backend_label || state.env.backend}`;
@@ -447,8 +450,13 @@ function homeHtml() {
     <div class="project">
       <div class="project-row">
         <button data-open="${project.id}">
-          <strong>${escapeHtml(project.name || "未命名")}</strong>
-          <span>${formatTime(project.duration || 0)} · ${project.width || "?"}×${project.height || "?"}</span>
+          <span class="project-thumb" aria-hidden="true">
+            <video src="/api/projects/${project.id}/media#t=0.1" muted playsinline preload="metadata"></video>
+          </span>
+          <span class="project-copy">
+            <strong>${escapeHtml(project.name || "未命名")}</strong>
+            <span class="meta">${formatTime(project.duration || 0)} · ${project.width || "?"}×${project.height || "?"}</span>
+          </span>
         </button>
         <button class="btn icon danger" data-delete="${project.id}" title="${t("delete")}">${ICONS.trash}</button>
       </div>

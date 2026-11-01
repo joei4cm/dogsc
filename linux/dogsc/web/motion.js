@@ -85,6 +85,28 @@ const DogSCMotion = (() => {
     thumb.style.width = `${width}px`;
   }
 
+  /** Sliding white pill inside .segmented controls. */
+  function slideSegment(group, activeButton) {
+    if (!group || !activeButton) return;
+    let thumb = group.querySelector(".seg-thumb");
+    if (!thumb) {
+      thumb = document.createElement("div");
+      thumb.className = "seg-thumb";
+      group.prepend(thumb);
+    }
+    const groupBox = group.getBoundingClientRect();
+    const box = activeButton.getBoundingClientRect();
+    const left = box.left - groupBox.left;
+    thumb.style.transform = `translateX(${left}px)`;
+    thumb.style.width = `${box.width}px`;
+  }
+
+  function syncSegments(root = document) {
+    root.querySelectorAll(".segmented").forEach((group) => {
+      slideSegment(group, group.querySelector("button.active") || group.querySelector("button"));
+    });
+  }
+
   function press(node) {
     if (!node || reduces()) return;
     node.animate(
@@ -102,5 +124,5 @@ const DogSCMotion = (() => {
     node.style.pointerEvents = open ? "auto" : "none";
   }
 
-  return { reduces, animate, cssTransition, slideThumb, press, morphOpen, PRESETS };
+  return { reduces, animate, cssTransition, slideThumb, slideSegment, syncSegments, press, morphOpen, PRESETS };
 })();

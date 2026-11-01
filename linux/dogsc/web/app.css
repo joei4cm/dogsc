@@ -67,10 +67,17 @@ html, body {
   margin: 0; height: 100%;
   background: var(--bg); color: var(--ink);
   letter-spacing: -0.01em;
+  line-break: strict;
 }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; border: 0; background: none; }
 button:disabled { opacity: 0.35; cursor: not-allowed; }
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid rgba(31, 31, 31, 0.55);
+  outline-offset: 2px;
+}
+::selection { background: rgba(31, 31, 31, 0.14); color: var(--ink); }
 input[type="color"] { width: 36px; height: 28px; border: 0; background: none; padding: 0; }
 
 /* Soft Silver range — quiet rail, platinum ink, paper thumb */
@@ -256,15 +263,33 @@ input[type="range"]::-moz-range-thumb {
 }
 .projects-list { overflow: auto; display: grid; gap: 6px; align-content: start; }
 .project {
-  text-align: left; background: var(--well); border-radius: var(--radius-group); padding: 11px 12px;
+  text-align: left; background: var(--well); border-radius: var(--radius-group); padding: 8px;
   display: grid; gap: 2px; border: 0;
-  transition: background-color 0.15s ease-out;
+  transition: background-color 0.15s ease-out, transform 0.24s cubic-bezier(0.2, 1, 0.3, 1);
 }
 .project:hover { background: var(--selection); }
+.project:active { transform: scale(0.985); }
 .project strong { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; }
-.project span { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.project-row { display: flex; gap: 6px; align-items: start; }
-.project-row > button:first-child { flex: 1; text-align: left; }
+.project .meta { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.project-row { display: flex; gap: 6px; align-items: center; }
+.project-row > button:first-child {
+  flex: 1; text-align: left;
+  display: grid; grid-template-columns: 56px 1fr; gap: 10px; align-items: center;
+  padding: 2px; border-radius: calc(var(--radius-group) - 4px);
+}
+.project-thumb {
+  width: 56px; height: 40px; border-radius: 8px; overflow: hidden;
+  background: #1a1c20; position: relative;
+  box-shadow: inset 0 0 0 0.5px rgba(26, 31, 46, 0.12), var(--contact-shadow);
+}
+.project-thumb video, .project-thumb img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+  pointer-events: none;
+}
+.project-copy { min-width: 0; display: grid; gap: 2px; }
+.project-copy strong, .project-copy .meta {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
 
 /* Recorder capsule */
@@ -325,10 +350,12 @@ input[type="range"]::-moz-range-thumb {
 .stage-hud { will-change: transform; }
 @media (prefers-reduced-motion: reduce) {
   .inspector-rail .rail-thumb,
+  .segmented .seg-thumb,
   .recorder-popover,
   .recorder-capsule,
   .rec-toggle, .mode-wheel, .record-go, .hud-btn, .play-btn, .tl-tool,
-  .inspector-rail button { transition: none !important; }
+  .inspector-rail button,
+  .project { transition: none !important; }
 }
 .recorder-popover .section-title { margin-bottom: 8px; }
 .choices { display: grid; gap: 4px; max-height: 220px; overflow: auto; }
@@ -693,18 +720,35 @@ input[type="range"]::-moz-range-thumb {
 .segmented {
   display: flex; gap: 2px; background: rgba(0, 0, 0, 0.04); padding: 3px; border-radius: 11px;
   box-shadow: inset 0 0.75px 1.5px rgba(26, 31, 46, 0.05);
+  position: relative;
 }
-.segmented button {
-  flex: 1; height: 28px; border-radius: 8px; color: var(--muted);
-  font-size: 12px; font-weight: 500; letter-spacing: -0.01em;
-}
-.segmented button.active {
+.segmented .seg-thumb {
+  position: absolute; top: 3px; left: 3px; height: 28px;
+  border-radius: 8px;
   background: linear-gradient(180deg, #ffffff, #f7f7f9);
-  color: var(--ink); font-weight: 600;
   box-shadow:
     0 0.5px 1px rgba(26, 31, 46, 0.08),
     0 1px 0 rgba(255,255,255,0.95) inset,
     0 -0.5px 0 rgba(26, 31, 46, 0.04) inset;
+  transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+              width 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none; z-index: 0;
+  will-change: transform, width;
+}
+.segmented button {
+  position: relative; z-index: 1;
+  flex: 1; height: 28px; border-radius: 8px; color: var(--muted);
+  font-size: 12px; font-weight: 500; letter-spacing: -0.01em;
+  background: transparent;
+}
+.segmented button.active {
+  background: transparent;
+  color: var(--ink); font-weight: 600;
+  box-shadow: none;
+}
+.preset-grid .tile:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px var(--platinum);
 }
 .swatches { display: flex; gap: 8px; flex-wrap: wrap; }
 .swatches button, .preset-grid button {
@@ -871,5 +915,22 @@ input[type="range"]::-moz-range-thumb {
   .workspace { grid-template-columns: 1fr; }
   .inspector { border-left: 0; border-top: 0.5px solid var(--line); min-height: 280px; }
   .editor { grid-template-rows: minmax(360px, 1fr) 220px; }
-  .projects-drawer { display: none; }
+  .home-stage {
+    display: flex; flex-direction: column; align-items: stretch;
+    justify-content: flex-start; gap: 18px;
+    padding: 18px 14px 118px; overflow: auto;
+  }
+  .home-copy { margin: 12px auto 0; }
+  .home-copy h1 { font-size: 28px; }
+  .projects-drawer {
+    position: static; width: auto; max-width: 520px; margin: 0 auto;
+    bottom: auto; top: auto; right: auto; left: auto;
+    max-height: min(240px, 38vh);
+  }
+  .recorder-dock { bottom: 16px; width: min(100% - 24px, 420px); }
+  .recorder-capsule {
+    width: 100%; justify-content: space-between; padding: 0 6px;
+    height: 52px;
+  }
+  .mode-wheel span:not(.chev) { max-width: 4.5em; overflow: hidden; text-overflow: ellipsis; }
 }
