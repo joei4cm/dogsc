@@ -6,7 +6,8 @@ import subprocess
 from dogsc.backgrounds import dynamic_png, pattern_png, solid_color
 from dogsc.errors import DogSCError
 from dogsc.frames import frame_metrics, render_frame
-from dogsc.media import cursor_png, rounded_mask
+from dogsc.media import cursor_png, rounded_mask, probe
+from dogsc.model import clamp_crop
 from dogsc.zoom import absolute_zooms, clip_duration, sample, viewport
 
 
@@ -303,10 +304,17 @@ def build_export(project: dict, media: Path, pointer: list[dict], output: Path, 
     cursor = project.get("cursor") or {}
     export = project.get("export") or {}
     fps = int(export.get("fps") or 30)
-    canvas_w, canvas_h = canvas_size(src_w, src_h, str(canvas.get("aspect") or "source"), str(export.get("resolution") or "source"))
+    crop = clamp_crop(canvas.get("crop"))
+    cropped_w = max(even(src_w * float(crop["width"])), 2)
+    cropped_h = max(even(src_h * float(crop["height"])), 2)
+    crop_x = max(int(round(src_w * float(crop["x"]))), 0)
+    crop_y = max(int(round(src_h * float(crop["y"]))), 0)
+    crop_x = min(crop_x, max(src_w - cropped_w, 0))
+    crop_y = min(crop_y, max(src_h - cropped_h, 0))
+    canvas_w, canvas_h = canvas_size(cropped_w, cropped_h, str(canvas.get("aspect") or "source"), str(export.get("resolution") or "source"))
     frame_style = str(canvas.get("screen_frame") or "none")
     box = content_layout(
-        src_w, src_h, canvas_w, canvas_h,
+        cropped_w, cropped_h, canvas_w, canvas_h,
         float(canvas.get("padding") or 0),
         float(canvas.get("content_scale") or 1),
         float(canvas.get("content_x") if canvas.get("content_x") is not None else 0.5),
@@ -423,6 +431,13 @@ def build_export(project: dict, media: Path, pointer: list[dict], output: Path, 
                 f"[mkeep{index}][{label}]overlay=x={x}:y={y}:enable='between({time_token()},{start:.3f},{end:.3f})'[{next_label}]"
             )
         current = next_label
+
+    # Source crop (canvas.crop) sits after mosaics and before zoom framing.
+    if abs(float(crop["width"]) - 1.0) > 1e-4 or abs(float(crop["height"]) - 1.0) > 1e-4 or crop_x or crop_y:
+        graph.append(
+            f"[{current}]crop={cropped_w}:{cropped_h}:{crop_x}:{crop_y}[srccrop]"
+        )
+        current = "srccrop"
 
     motion_filter = screen_motion_filter(motions, box["content_w"], box["content_h"])
     graph.append(
@@ -622,3 +637,46 @@ def preview_sample(project: dict, time: float) -> dict[str, float]:
             }
             break
     return {**sampled, **frame, "motion": motion}
+
+
+def estimate_export(project: dict, media: Path | None = None) -> dict:
+    """Rough byte/size estimate for the Soft Silver export sheet."""
+    canvas = project.get("canvas") or {}
+    export = project.get("export") or {}
+    clips = project.get("clips") or []
+    duration = max(sum(clip_duration(clip) for clip in clips), 0.1)
+    fps = int(export.get("fps") or 30)
+    src_w = src_h = 1920
+    if media and Path(media).is_file():
+        try:
+            info = probe(Path(media))
+            src_w = int(info["width"] or src_w)
+            src_h = int(info["height"] or src_h)
+        except Exception:
+            pass
+    else:
+        media_info = project.get("media") or {}
+        src_w = int(media_info.get("width") or src_w)
+        src_h = int(media_info.get("height") or src_h)
+    crop = clamp_crop(canvas.get("crop"))
+    cropped_w = max(even(src_w * float(crop["width"])), 2)
+    cropped_h = max(even(src_h * float(crop["height"])), 2)
+    width, height = canvas_size(
+        cropped_w,
+        cropped_h,
+        str(canvas.get("aspect") or "source"),
+        str(export.get("resolution") or "1080p"),
+    )
+    megapixels = (width * height) / 1_000_000
+    # Soft H.264-ish bitrate curve used only for UI sizing, not encoding.
+    mbps = max(2.5, min(28.0, 3.2 + megapixels * 2.4)) * (fps / 30)
+    audio_mbps = 0.16
+    bytes_est = int((mbps + audio_mbps) * 1_000_000 / 8 * duration)
+    return {
+        "width": width,
+        "height": height,
+        "fps": fps,
+        "duration": duration,
+        "megabits_per_second": round(mbps + audio_mbps, 2),
+        "bytes": bytes_est,
+    }

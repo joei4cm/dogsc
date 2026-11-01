@@ -424,10 +424,14 @@ input[type="range"]::-moz-range-thumb {
 .editor {
   height: 100%;
   display: grid;
-  grid-template-rows: 1fr 248px;
+  grid-template-rows: 1fr var(--timeline-h, 248px);
+  grid-template-areas: "main" "timeline";
   background: var(--bg);
   min-height: 0;
+  position: relative;
 }
+.editor > .workspace { grid-area: main; }
+.editor > .timeline { grid-area: timeline; }
 .inspector-scope {
   background: var(--well); border-radius: var(--radius-card); padding: 11px;
   margin-bottom: 14px;
@@ -503,9 +507,34 @@ input[type="range"]::-moz-range-thumb {
 .workspace {
   min-height: 0;
   display: grid;
-  /* Apple inspector default 384 (clamp 340–480); web uses 360 for stage budget */
-  grid-template-columns: 1fr 360px;
+  /* Apple inspector default 384 (clamp 340–480); web default 360, drag 340–480 */
+  grid-template-columns: 1fr var(--inspector-w, 360px);
+  position: relative;
 }
+.splitter-v {
+  position: absolute; top: 0; bottom: 0; width: 8px;
+  right: var(--inspector-w, 360px); margin-right: -4px;
+  cursor: col-resize; z-index: 8;
+}
+.splitter-v::after {
+  content: ""; position: absolute; left: 3px; top: 28%; bottom: 28%; width: 2px;
+  border-radius: 2px; background: transparent;
+}
+.splitter-v:hover::after, .splitter-v:active::after { background: rgba(26, 31, 46, 0.18); }
+.splitter-h {
+  grid-area: main;
+  align-self: end;
+  justify-self: stretch;
+  position: relative;
+  height: 8px;
+  margin-bottom: -4px;
+  cursor: row-resize; z-index: 8;
+}
+.splitter-h::after {
+  content: ""; position: absolute; top: 3px; left: 28%; right: 28%; height: 2px;
+  border-radius: 2px; background: transparent;
+}
+.splitter-h:hover::after, .splitter-h:active::after { background: rgba(26, 31, 46, 0.18); }
 .stage {
   min-width: 0; min-height: 0;
   display: grid; place-items: center;
@@ -600,6 +629,111 @@ input[type="range"]::-moz-range-thumb {
   position: absolute; z-index: 6; overflow: hidden; border: 3px solid #fff;
   box-shadow: 0 10px 28px rgba(0,0,0,0.22);
   background: #222; color: #ddd; display: grid; place-items: center; font-size: 11px;
+}
+.pip video {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+}
+.pip span { position: relative; z-index: 1; pointer-events: none; mix-blend-mode: difference; }
+.stage-overlays { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
+.overlay-mosaic {
+  position: absolute; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.18);
+}
+.overlay-mosaic.selected { box-shadow: inset 0 0 0 2px #fff, 0 0 0 1px rgba(0,0,0,0.35); }
+.overlay-sticker {
+  position: absolute; object-fit: contain; pointer-events: none;
+  filter: drop-shadow(0 8px 18px rgba(0,0,0,0.28));
+}
+.crop-overlay {
+  position: absolute; inset: 0; z-index: 7; pointer-events: none;
+}
+.crop-shade {
+  position: absolute; background: rgba(8, 10, 14, 0.48); pointer-events: none;
+}
+.crop-rect {
+  position: absolute; box-sizing: border-box;
+  border: 1.5px solid rgba(255,255,255,0.92);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.25), inset 0 0 0 1px rgba(0,0,0,0.12);
+  cursor: move; pointer-events: auto;
+  background:
+    linear-gradient(rgba(255,255,255,0.35) 1px, transparent 1px) 0 33.33% / 100% 33.33%,
+    linear-gradient(90deg, rgba(255,255,255,0.35) 1px, transparent 1px) 33.33% 0 / 33.33% 100%;
+}
+.crop-rect i {
+  position: absolute; width: 10px; height: 10px; border-radius: 2px;
+  background: #fdfdfe; border: 1px solid rgba(26,31,46,0.35);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.25); pointer-events: auto;
+}
+.crop-rect i[data-handle="nw"] { left: -5px; top: -5px; cursor: nwse-resize; }
+.crop-rect i[data-handle="n"] { left: 50%; top: -5px; margin-left: -5px; cursor: ns-resize; }
+.crop-rect i[data-handle="ne"] { right: -5px; top: -5px; cursor: nesw-resize; }
+.crop-rect i[data-handle="e"] { right: -5px; top: 50%; margin-top: -5px; cursor: ew-resize; }
+.crop-rect i[data-handle="se"] { right: -5px; bottom: -5px; cursor: nwse-resize; }
+.crop-rect i[data-handle="s"] { left: 50%; bottom: -5px; margin-left: -5px; cursor: ns-resize; }
+.crop-rect i[data-handle="sw"] { left: -5px; bottom: -5px; cursor: nesw-resize; }
+.crop-rect i[data-handle="w"] { left: -5px; top: 50%; margin-top: -5px; cursor: ew-resize; }
+.crop-mode-chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 30px;
+  padding: 0 10px; border-radius: 999px; margin-right: 4px;
+  background: var(--selection); color: var(--ink);
+  font-size: 11px; font-weight: 600; letter-spacing: -0.01em;
+}
+.crop-mode-chip .icon-svg { width: 13px; height: 13px; }
+.hud-btn.primary {
+  background: linear-gradient(180deg, #2c2c2c, var(--platinum-deep));
+  color: var(--on-accent);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.12) inset;
+}
+.hud-btn:disabled, .play-btn:disabled { opacity: 0.35; pointer-events: none; }
+.stage.is-cropping .chrome, .stage.is-cropping .pip { opacity: 0; }
+.stage.preview-fast .camera video { image-rendering: auto; }
+.export-scrim {
+  position: fixed; inset: 0; z-index: 40;
+  background: rgba(26, 31, 46, 0.28);
+  display: grid; place-items: center;
+  backdrop-filter: blur(6px);
+}
+.export-sheet {
+  width: min(380px, calc(100vw - 32px));
+  padding: 18px;
+  transform-origin: center;
+  animation: sheetIn 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes sheetIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+.export-meta {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+  margin: 12px 0 14px;
+}
+.export-meta div {
+  background: var(--well); border-radius: 12px; padding: 10px 8px;
+  text-align: center;
+}
+.export-meta span {
+  display: block; font-size: 10px; color: var(--faint); font-weight: 500; margin-bottom: 4px;
+}
+.export-meta strong {
+  font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.export-progress {
+  height: 6px; border-radius: 99px; background: rgba(0,0,0,0.08); overflow: hidden; margin-bottom: 8px;
+}
+.export-progress i {
+  display: block; height: 100%; width: 0;
+  background: linear-gradient(90deg, #2c2c2c, var(--platinum));
+  border-radius: inherit; transition: width 0.25s ease-out;
+}
+.export-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.snap-guide {
+  position: absolute; top: 0; bottom: 0; width: 1px; z-index: 6;
+  background: var(--amber);
+  box-shadow: 0 0 0 1px rgba(242, 173, 71, 0.2);
+  pointer-events: none; margin-left: 0;
+}
+.wave-canvas {
+  position: absolute; inset: 6px 4px; width: calc(100% - 8px); height: calc(100% - 12px);
+  opacity: 0.9; pointer-events: none;
 }
 
 /* Stage HUD — regularMaterial over media */

@@ -238,3 +238,61 @@ def thumbs(media: Path, directory: Path, count: int = 8) -> list[str]:
         if target.exists():
             names.append(name)
     return names
+
+
+def thumb_at(media: Path, directory: Path, source_time: float, width: int = 160) -> Path | None:
+    """Extract a single JPEG at source time for time-aligned filmstrip cells."""
+    directory.mkdir(parents=True, exist_ok=True)
+    moment = max(float(source_time), 0.0)
+    key = f"t{int(round(moment * 1000)):08d}.jpg"
+    target = directory / key
+    if target.is_file() and target.stat().st_size > 0:
+        return target
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-ss", f"{moment:.3f}", "-i", str(media),
+            "-frames:v", "1", "-vf", f"scale={max(int(width), 48)}:-2", str(target),
+        ],
+        check=False,
+        capture_output=True,
+    )
+    return target if target.is_file() else None
+
+
+def audio_peaks(media: Path, buckets: int = 240) -> list[float]:
+    """Downsample mono PCM peak envelope for timeline waveform mode."""
+    count = min(max(int(buckets), 16), 2048)
+    completed = subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error",
+            "-i", str(media),
+            "-ac", "1", "-f", "f32le", "-vn", "-",
+        ],
+        check=False,
+        capture_output=True,
+    )
+    raw = completed.stdout or b""
+    if len(raw) < 4:
+        return [0.08] * count
+    sample_count = len(raw) // 4
+    values = struct.unpack(f"<{sample_count}f", raw[: sample_count * 4])
+    if sample_count < count:
+        peaks = [min(abs(v), 1.0) for v in values]
+        peaks.extend([0.0] * (count - len(peaks)))
+        return peaks[:count]
+    chunk = max(sample_count // count, 1)
+    peaks: list[float] = []
+    for index in range(count):
+        start = index * chunk
+        end = min(start + chunk, sample_count)
+        if start >= end:
+            peaks.append(0.0)
+            continue
+        peak = 0.0
+        for sample in values[start:end]:
+            magnitude = abs(sample)
+            if magnitude > peak:
+                peak = magnitude
+        peaks.append(min(peak, 1.0))
+    return peaks

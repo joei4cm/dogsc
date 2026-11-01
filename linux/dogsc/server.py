@@ -11,8 +11,8 @@ import threading
 import webbrowser
 
 from dogsc.errors import DogSCError
-from dogsc.export_plan import build_export
-from dogsc.media import probe
+from dogsc.export_plan import build_export, estimate_export
+from dogsc.media import audio_peaks, probe, thumb_at
 from dogsc.model import (
     ASPECTS,
     BACKGROUND_KINDS,
@@ -30,6 +30,7 @@ from dogsc.model import (
     blank_mosaic,
     blank_screen_motion,
     blank_sticker,
+    clamp_crop,
     migrate,
 )
 from dogsc.platform import detect
@@ -185,12 +186,33 @@ class Handler(BaseHTTPRequestHandler):
             if not target.is_file():
                 return self._error(404, "没有这张缩略图。")
             return self._file(target, "image/jpeg")
+        if tail == "thumb":
+            query = urlparse(self.path).query
+            params = dict(part.split("=", 1) for part in query.split("&") if "=" in part)
+            try:
+                source_time = float(unquote(params.get("t", "0")))
+            except ValueError:
+                source_time = 0.0
+            target = thumb_at(
+                media_path(project_id),
+                project_dir(project_id) / "thumbs" / "timed",
+                source_time,
+            )
+            if target is None:
+                return self._error(404, "没有这张缩略图。")
+            return self._file(target, "image/jpeg")
+        if tail == "peaks":
+            peaks = audio_peaks(media_path(project_id), buckets=240)
+            return self._json({"peaks": peaks})
         if tail.startswith("assets/"):
             name = Path(tail.split("/", 1)[1]).name
             target = assets_dir(project_id) / name
             if not target.is_file():
                 return self._error(404, "没有这个素材。")
             return self._file(target, mimetypes.guess_type(target.name)[0] or "application/octet-stream")
+        if tail == "export/estimate":
+            project = migrate(load(project_id))
+            return self._json(estimate_export(project, media_path(project_id)))
         if tail == "export/status":
             return self._json(APP.exports.get(project_id) or {"state": "idle"})
         if tail == "export/file":
@@ -523,6 +545,8 @@ def _merge_canvas(canvas: dict, incoming: dict) -> dict:
         canvas["frame_title"] = str(incoming["frame_title"])[:40]
     if "frame_address" in incoming:
         canvas["frame_address"] = str(incoming["frame_address"])[:80]
+    if "crop" in incoming and isinstance(incoming["crop"], dict):
+        canvas["crop"] = clamp_crop(incoming["crop"])
     return canvas
 
 

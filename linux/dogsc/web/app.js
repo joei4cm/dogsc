@@ -23,12 +23,48 @@ const state = {
   recorderPopover: null,
   hudMenu: null,
   cropping: false,
+  cropDraft: null,
+  cropOrigin: null,
+  exportSheet: null,
+  previewQuality: localStorage.getItem("dogsc-preview-quality") || "full",
+  inspectorWidth: Number(localStorage.getItem("dogsc-inspector-w") || 360),
+  timelineHeight: Number(localStorage.getItem("dogsc-timeline-h") || 248),
+  snapGuide: null,
+  peaks: null,
+  peaksProjectId: null,
+  cameraStream: null,
   timelineMode: "picture",
   magnetic: true,
   hoverPreview: true,
   timelineZoom: 1,
   dirty: false,
 };
+
+function blankCrop() {
+  return { x: 0, y: 0, width: 1, height: 1 };
+}
+function clampCrop(crop, minimum = 0.02) {
+  const floor = Math.min(Math.max(minimum, 0.001), 1);
+  const x = Math.min(Math.max(Number(crop?.x) || 0, 0), 1 - floor);
+  const y = Math.min(Math.max(Number(crop?.y) || 0, 0), 1 - floor);
+  return {
+    x,
+    y,
+    width: Math.min(Math.max(Number(crop?.width) || 1, floor), 1 - x),
+    height: Math.min(Math.max(Number(crop?.height) || 1, floor), 1 - y),
+  };
+}
+function activeCrop() {
+  if (state.cropping && state.cropDraft) return clampCrop(state.cropDraft);
+  return clampCrop(state.project?.canvas?.crop);
+}
+function formatBytes(bytes) {
+  const value = Math.max(Number(bytes) || 0, 0);
+  if (value < 1024) return `${Math.round(value)} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
 
 const ICONS = {
   display: `<svg class="icon-svg" viewBox="0 0 18 18"><rect x="1.5" y="2.5" width="15" height="10" rx="2.4"/><path d="M6 15.6h6"/></svg>`,
@@ -309,8 +345,46 @@ function closeFloatingUI() {
   let changed = false;
   if (state.recorderPopover) { state.recorderPopover = null; changed = true; }
   if (state.hudMenu) { state.hudMenu = null; changed = true; }
-  if (state.cropping) { state.cropping = false; changed = true; }
+  if (state.exportSheet && state.exportSheet.state !== "running") {
+    state.exportSheet = null;
+    changed = true;
+  }
+  if (state.cropping) {
+    discardCrop();
+    changed = true;
+  }
   return changed;
+}
+function beginCrop() {
+  if (!state.project || state.cropping) return;
+  state.playing = false;
+  updatePlayButton();
+  state.hudMenu = null;
+  state.cropOrigin = clampCrop(state.project.canvas?.crop);
+  state.cropDraft = { ...state.cropOrigin };
+  state.cropping = true;
+}
+function discardCrop() {
+  state.cropping = false;
+  state.cropDraft = null;
+  state.cropOrigin = null;
+}
+function resetCropDraft() {
+  if (!state.cropping) return;
+  state.cropDraft = blankCrop();
+  paintCanvas();
+  syncCropOverlay();
+}
+async function confirmCrop() {
+  if (!state.cropping || !state.project) return;
+  const crop = clampCrop(state.cropDraft);
+  try {
+    await meta({ canvas: { ...state.project.canvas, crop } });
+    discardCrop();
+    render();
+  } catch (error) {
+    toast(error.message);
+  }
 }
 function updatePlayButton() {
   const playBtn = document.querySelector("#play");
@@ -555,8 +629,8 @@ function stageHudHtml(project) {
     <label class="btn" style="width:100%;justify-content:flex-start;margin:0;border-radius:8px">${t("addSticker")}<input id="sticker-file" type="file" accept="image/*" hidden></label>
   </div>` : "";
   const previewMenu = state.hudMenu === "preview" ? `<div class="hud-menu island" style="left:auto;right:0">
-    <button class="active">${state.lang === "zh" ? "完整画质" : "Full quality"}</button>
-    <button>${state.lang === "zh" ? "流畅预览" : "Fast preview"}</button>
+    <button data-preview="full" class="${state.previewQuality === "full" ? "active" : ""}">${state.lang === "zh" ? "完整画质" : "Full quality"}</button>
+    <button data-preview="fast" class="${state.previewQuality === "fast" ? "active" : ""}">${state.lang === "zh" ? "流畅预览" : "Fast preview"}</button>
   </div>` : "";
   const shortcutsPanel = state.hudMenu === "shortcuts" ? `<aside class="shortcuts-panel island" id="shortcuts-panel" role="dialog" aria-label="${state.lang === "zh" ? "快捷键" : "Shortcuts"}">
     <div class="section-title">${state.lang === "zh" ? "快捷键" : "Shortcuts"}</div>
@@ -567,12 +641,17 @@ function stageHudHtml(project) {
     <div class="shortcut-row"><span>${state.lang === "zh" ? "上一帧 / 下一帧" : "Step frames"}</span><kbd>← →</kbd></div>
     <div class="shortcut-row"><span>${state.lang === "zh" ? "关闭浮层" : "Dismiss"}</span><kbd>${shortcutHint("back")}</kbd></div>
   </aside>` : "";
-  return `${shortcutsPanel}<div class="stage-hud" id="stage-hud">
+  const cropControls = state.cropping ? `
+    <span class="crop-mode-chip">${ICONS.crop}<span>${state.lang === "zh" ? "裁切模式" : "Crop"}</span></span>
+    <button class="hud-btn" id="crop-reset">${state.lang === "zh" ? "清除裁切" : "Clear"}</button>
+    <button class="hud-btn" id="crop-cancel">${state.lang === "zh" ? "取消" : "Cancel"}</button>
+    <button class="hud-btn primary" id="crop-confirm">${state.lang === "zh" ? "完成" : "Done"}</button>
+  ` : `
     <div style="position:relative">
       <button class="hud-btn" id="aspect-btn">${project.canvas.aspect || "16:9"}</button>
       ${aspectMenu}
     </div>
-    <button class="hud-btn ${state.cropping ? "active" : ""}" id="crop-btn" title="裁切">${ICONS.crop}</button>
+    <button class="hud-btn" id="crop-btn" title="${state.lang === "zh" ? "裁切 · Esc 取消" : "Crop · Esc cancels"}">${ICONS.crop}</button>
     <div style="position:relative">
       <button class="hud-btn" id="add-btn" title="${t("addToCanvas")}">${ICONS.plus}</button>
       ${addMenu}
@@ -581,10 +660,13 @@ function stageHudHtml(project) {
       <button class="hud-btn" id="preview-btn" title="${t("previewOpts")}">${ICONS.sliders}</button>
       ${previewMenu}
     </div>
+  `;
+  return `${shortcutsPanel}<div class="stage-hud" id="stage-hud">
+    ${cropControls}
     <div class="hud-divider"></div>
-    <button class="hud-btn" id="step-back" title="${state.lang === "zh" ? "上一帧 · ←" : "Previous frame · ←"}">${ICONS.prev}</button>
-    <button class="play-btn ${state.playing ? "playing" : ""}" id="play" title="${state.playing ? t("pause") : t("playing")} · ${shortcutHint("play")}" aria-pressed="${state.playing}">${state.playing ? ICONS.pause : ICONS.play}</button>
-    <button class="hud-btn" id="step-forward" title="${state.lang === "zh" ? "下一帧 · →" : "Next frame · →"}">${ICONS.next}</button>
+    <button class="hud-btn" id="step-back" title="${state.lang === "zh" ? "上一帧 · ←" : "Previous frame · ←"}" ${state.cropping ? "disabled" : ""}>${ICONS.prev}</button>
+    <button class="play-btn ${state.playing ? "playing" : ""}" id="play" title="${state.playing ? t("pause") : t("playing")} · ${shortcutHint("play")}" aria-pressed="${state.playing}" ${state.cropping ? "disabled" : ""}>${state.playing ? ICONS.pause : ICONS.play}</button>
+    <button class="hud-btn" id="step-forward" title="${state.lang === "zh" ? "下一帧 · →" : "Next frame · →"}" ${state.cropping ? "disabled" : ""}>${ICONS.next}</button>
     <span class="hud-time" id="clock">${formatTime(state.time)} <em>/ ${formatTime(Z.duration(project.clips))}</em></span>
   </div>`;
 }
@@ -609,43 +691,89 @@ function timelineBarHtml() {
   </div>`;
 }
 
+function exportSheetHtml() {
+  const sheet = state.exportSheet;
+  if (!sheet) return "";
+  const zh = state.lang === "zh";
+  const estimate = sheet.estimate || {};
+  const progress = Math.round((sheet.progress || 0) * 100);
+  const busy = sheet.state === "running";
+  return `<div class="export-scrim" id="export-scrim">
+    <aside class="export-sheet island" role="dialog" aria-label="${t("export")}">
+      <div class="section-title">${zh ? "导出成片" : "Export"}</div>
+      <p class="note">${zh ? "按当前画面、裁切与运镜生成 MP4。" : "Renders MP4 with current canvas, crop, and motion."}</p>
+      <label class="field">${t("resolution")}<select id="sheet-resolution" ${busy ? "disabled" : ""}>${options(["source", "1080p", "1440p", "4k"], state.project.export.resolution)}</select></label>
+      <label class="field">${t("fps")}<select id="sheet-fps" ${busy ? "disabled" : ""}>${options(["30", "60"], String(state.project.export.fps))}</select></label>
+      <div class="export-meta">
+        <div><span>${zh ? "分辨率" : "Size"}</span><strong>${estimate.width || "—"}×${estimate.height || "—"}</strong></div>
+        <div><span>${zh ? "时长" : "Duration"}</span><strong>${formatTime(estimate.duration || Z.duration(state.project.clips))}</strong></div>
+        <div><span>${zh ? "估大小" : "Est."}</span><strong>${formatBytes(estimate.bytes || 0)}</strong></div>
+      </div>
+      ${busy ? `<div class="export-progress"><i style="width:${progress}%"></i></div><p class="note">${zh ? `导出中… ${progress}%` : `Exporting… ${progress}%`}</p>` : ""}
+      ${sheet.error ? `<p class="note" style="color:var(--red)">${escapeHtml(sheet.error)}</p>` : ""}
+      <div class="export-actions">
+        <button class="btn" id="export-cancel" ${busy ? "disabled" : ""}>${zh ? "取消" : "Cancel"}</button>
+        <button class="btn primary" id="export-start" ${busy ? "disabled" : ""}>${busy ? (zh ? "导出中" : "Working") : (zh ? "开始导出" : "Start")}</button>
+      </div>
+    </aside>
+  </div>`;
+}
+
 function editorHtml() {
   const project = state.project;
+  const inspectorW = Math.min(Math.max(state.inspectorWidth || 360, 340), 480);
+  const timelineH = Math.min(Math.max(state.timelineHeight || 248, 180), 420);
   return `<div class="shell editor-shell">
     <header class="topbar editor-topbar">
       <div class="top-leading">
-        <button class="btn icon project-menu" id="back" title="${t("back")}">${ICONS.folder}${ICONS.chevronDown}</button>
-        <input class="title" id="project-name" value="${escapeHtml(project.name)}">
+        <button class="btn icon project-menu" id="back" title="${t("back")}" ${state.cropping ? "disabled" : ""}>${ICONS.folder}${ICONS.chevronDown}</button>
+        <input class="title" id="project-name" value="${escapeHtml(project.name)}" ${state.cropping ? "disabled" : ""}>
         <span class="saved">${ICONS.check}<span>${t("saved")}</span></span>
         <span class="toolbar-divider"></span>
-        <button class="btn icon" id="undo" title="${t("undo")} · ${shortcutHint("undo")}">${ICONS.undo}</button>
-        <button class="btn icon" id="redo" title="${t("redo")} · ${shortcutHint("redo")}">${ICONS.redo}</button>
+        <button class="btn icon" id="undo" title="${t("undo")} · ${shortcutHint("undo")}" ${state.cropping ? "disabled" : ""}>${ICONS.undo}</button>
+        <button class="btn icon" id="redo" title="${t("redo")} · ${shortcutHint("redo")}" ${state.cropping ? "disabled" : ""}>${ICONS.redo}</button>
       </div>
       <div class="top-trailing">
         <button class="btn icon" id="lang" title="${t("lang")}">${t("lang") === "English" ? "EN" : "中"}</button>
         <button class="btn icon" id="settings-btn" title="${state.lang === "zh" ? "快捷键" : "Shortcuts"}" aria-expanded="${state.hudMenu === "shortcuts"}">${ICONS.gear}</button>
-        <button class="btn icon danger" id="delete-project" title="${t("delete")}">${ICONS.trash}</button>
+        <button class="btn icon danger" id="delete-project" title="${t("delete")}" ${state.cropping ? "disabled" : ""}>${ICONS.trash}</button>
         <span class="toolbar-divider"></span>
-        <button class="btn primary export-btn" id="export">${ICONS.share}<span>${t("export")}</span></button>
+        <button class="btn primary export-btn" id="export" ${state.cropping ? "disabled" : ""} title="${state.cropping ? (state.lang === "zh" ? "请先完成或取消裁切" : "Finish or cancel crop first") : t("export")}">${ICONS.share}<span>${t("export")}</span></button>
       </div>
     </header>
-    <section class="editor">
-      <div class="workspace">
-        <div class="stage">
+    <section class="editor" style="--timeline-h:${timelineH}px">
+      <div class="workspace" style="--inspector-w:${inspectorW}px">
+        <div class="stage ${state.cropping ? "is-cropping" : ""} ${state.previewQuality === "fast" ? "preview-fast" : ""}">
           <div class="stage-dots"></div>
           <div class="canvas-frame" id="canvas"></div>
           ${stageHudHtml(project)}
         </div>
-        <aside class="inspector">
+        <div class="splitter-v" id="splitter-v" title="${state.lang === "zh" ? "拖拽调整检查器宽度" : "Drag to resize inspector"}"></div>
+        <aside class="inspector" ${state.cropping ? 'aria-disabled="true"' : ""}>
           <div class="inspector-rail">${inspectorTabsHtml()}</div>
-          <div class="inspector-body">${inspectorBody()}</div>
+          <div class="inspector-body">${state.cropping ? cropInspectorHtml() : inspectorBody()}</div>
         </aside>
       </div>
       <div class="timeline">
         ${timelineBarHtml()}
         <div class="lanes" id="lanes"></div>
       </div>
+      <div class="splitter-h" id="splitter-h" title="${state.lang === "zh" ? "拖拽调整时间线高度" : "Drag to resize timeline"}"></div>
     </section>
+    ${exportSheetHtml()}
+  </div>`;
+}
+
+function cropInspectorHtml() {
+  const crop = clampCrop(state.cropDraft);
+  const zh = state.lang === "zh";
+  return `<div class="section">
+    <div class="section-title">${zh ? "裁切屏幕" : "Crop screen"}</div>
+    <p class="note">${zh ? "拖动八个控制点或框体；Esc 取消。" : "Drag the eight handles or the frame. Esc cancels."}</p>
+    <label class="field">${fieldValue(zh ? "左边" : "Left", `${Math.round(crop.x * 100)}%`)}<input id="crop-left" type="range" min="0" max="0.9" step="0.01" value="${crop.x}"></label>
+    <label class="field">${fieldValue(zh ? "上边" : "Top", `${Math.round(crop.y * 100)}%`)}<input id="crop-top" type="range" min="0" max="0.9" step="0.01" value="${crop.y}"></label>
+    <label class="field">${fieldValue(zh ? "宽度" : "Width", `${Math.round(crop.width * 100)}%`)}<input id="crop-width" type="range" min="0.02" max="1" step="0.01" value="${crop.width}"></label>
+    <label class="field">${fieldValue(zh ? "高度" : "Height", `${Math.round(crop.height * 100)}%`)}<input id="crop-height" type="range" min="0.02" max="1" step="0.01" value="${crop.height}"></label>
   </div>`;
 }
 
@@ -1021,7 +1149,26 @@ function bind() {
   if (state.hudMenu) document.addEventListener("pointerdown", dismissHudMenu, { once: true });
   document.querySelector("#undo").onclick = () => mutate(`/api/projects/${state.project.id}/undo`, {});
   document.querySelector("#redo").onclick = () => mutate(`/api/projects/${state.project.id}/redo`, {});
-  document.querySelector("#export").onclick = exportProject;
+  document.querySelector("#export").onclick = openExportSheet;
+  document.querySelector("#export-cancel")?.addEventListener("click", () => {
+    if (state.exportSheet?.state === "running") return;
+    state.exportSheet = null;
+    render();
+  });
+  document.querySelector("#export-scrim")?.addEventListener("click", (event) => {
+    if (event.target.id !== "export-scrim" || state.exportSheet?.state === "running") return;
+    state.exportSheet = null;
+    render();
+  });
+  document.querySelector("#export-start")?.addEventListener("click", startExportFromSheet);
+  document.querySelector("#sheet-resolution")?.addEventListener("change", async (event) => {
+    await meta({ export: { ...state.project.export, resolution: event.target.value } });
+    refreshExportEstimate();
+  });
+  document.querySelector("#sheet-fps")?.addEventListener("change", async (event) => {
+    await meta({ export: { ...state.project.export, fps: Number(event.target.value) } });
+    refreshExportEstimate();
+  });
   document.querySelector("#apply-all-zooms")?.addEventListener("click", async () => {
     const selected = state.project.zooms.find((zoom) => zoom.id === state.selectedZoom);
     if (!selected) return;
@@ -1079,13 +1226,37 @@ function bind() {
   document.querySelector("#aspect-btn")?.addEventListener("click", () => { state.hudMenu = state.hudMenu === "aspect" ? null : "aspect"; render(); });
   document.querySelector("#add-btn")?.addEventListener("click", () => { state.hudMenu = state.hudMenu === "add" ? null : "add"; render(); });
   document.querySelector("#preview-btn")?.addEventListener("click", () => { state.hudMenu = state.hudMenu === "preview" ? null : "preview"; render(); });
-  document.querySelector("#crop-btn")?.addEventListener("click", () => { state.cropping = !state.cropping; state.hudMenu = null; render(); });
+  document.querySelector("#crop-btn")?.addEventListener("click", () => { beginCrop(); render(); });
+  document.querySelector("#crop-cancel")?.addEventListener("click", () => { discardCrop(); render(); });
+  document.querySelector("#crop-confirm")?.addEventListener("click", () => confirmCrop());
+  document.querySelector("#crop-reset")?.addEventListener("click", () => { resetCropDraft(); syncCropInspector(); });
+  document.querySelectorAll("[data-preview]").forEach((node) => node.onclick = () => {
+    state.previewQuality = node.dataset.preview;
+    localStorage.setItem("dogsc-preview-quality", state.previewQuality);
+    state.hudMenu = null;
+    render();
+  });
   document.querySelectorAll("[data-aspect]").forEach((node) => node.onclick = () => {
     state.hudMenu = null;
     meta({ canvas: { ...state.project.canvas, aspect: node.dataset.aspect } });
   });
+  ["#crop-left", "#crop-top", "#crop-width", "#crop-height"].forEach((selector) => {
+    document.querySelector(selector)?.addEventListener("input", () => {
+      if (!state.cropping) return;
+      const left = Number(document.querySelector("#crop-left")?.value || 0);
+      const top = Number(document.querySelector("#crop-top")?.value || 0);
+      const width = Number(document.querySelector("#crop-width")?.value || 1);
+      const height = Number(document.querySelector("#crop-height")?.value || 1);
+      state.cropDraft = clampCrop({ x: left, y: top, width: Math.min(width, 1 - left), height: Math.min(height, 1 - top) });
+      syncCropOverlay();
+      syncCropInspector();
+    });
+  });
   document.querySelector("#mode-picture")?.addEventListener("click", () => { state.timelineMode = "picture"; render(); });
-  document.querySelector("#mode-wave")?.addEventListener("click", () => { state.timelineMode = "waveform"; render(); });
+  document.querySelector("#mode-wave")?.addEventListener("click", () => {
+    state.timelineMode = "waveform";
+    ensurePeaks().then(() => render()).catch(() => render());
+  });
   document.querySelector("#magnetic")?.addEventListener("click", () => { state.magnetic = !state.magnetic; render(); });
   document.querySelector("#hover-preview")?.addEventListener("click", () => { state.hoverPreview = !state.hoverPreview; render(); });
   document.querySelector("#fit-all")?.addEventListener("click", () => { state.timelineZoom = 1; render(); });
@@ -1093,6 +1264,7 @@ function bind() {
     state.timelineZoom = Number(event.target.value);
     drawTimeline();
   });
+  bindSplitters();
   document.querySelectorAll("[data-tab]").forEach((node) => node.onclick = () => {
     DogSCMotion.press(node);
     state.tab = node.dataset.tab;
@@ -1309,12 +1481,12 @@ async function stopRecording() {
 function mountPreview() {
   const project = state.project;
   const frame = document.querySelector("#canvas");
-  frame.innerHTML = `<div class="content-box" id="content"><div class="content-shell" id="shell"><div class="chrome" id="chrome"></div><div class="camera" id="camera"><video id="video" src="/api/projects/${project.id}/media" playsinline></video><div class="cursor" id="cursor" hidden></div><div class="focus-dot" id="focus" hidden></div></div><div class="pip" id="pip" hidden>CAM</div></div></div>`;
+  frame.innerHTML = `<div class="content-box" id="content"><div class="content-shell" id="shell"><div class="chrome" id="chrome"></div><div class="camera" id="camera"><video id="video" src="/api/projects/${project.id}/media" playsinline></video><div class="stage-overlays" id="overlays"></div><div class="cursor" id="cursor" hidden></div><div class="focus-dot" id="focus" hidden></div><div class="crop-overlay" id="crop-overlay" hidden><div class="crop-shade" data-edge="top"></div><div class="crop-shade" data-edge="left"></div><div class="crop-shade" data-edge="right"></div><div class="crop-shade" data-edge="bottom"></div><div class="crop-rect" id="crop-rect"><i data-handle="nw"></i><i data-handle="n"></i><i data-handle="ne"></i><i data-handle="e"></i><i data-handle="se"></i><i data-handle="s"></i><i data-handle="sw"></i><i data-handle="w"></i></div></div></div><div class="pip" id="pip" hidden><video id="pip-video" playsinline muted autoplay></video><span>CAM</span></div></div></div>`;
   const video = document.querySelector("#video");
   DogSCPreview.attach(video);
   video.onloadedmetadata = paintCanvas;
   document.querySelector("#content").onclick = (event) => {
-    if (!state.selectedZoom) return;
+    if (state.cropping || !state.selectedZoom) return;
     const rect = document.querySelector("#camera").getBoundingClientRect();
     const view = Z.sampleViewport(project.clips, project.zooms, state.time);
     const u = (event.clientX - rect.left) / rect.width;
@@ -1323,6 +1495,8 @@ function mountPreview() {
     const focusY = view.top + v * view.size;
     updateZoom({ focus_x: Z.clamp(focusX, 0, 1), focus_y: Z.clamp(focusY, 0, 1) });
   };
+  bindCropOverlay();
+  ensureCameraPip();
 }
 
 function paintCanvas() {
@@ -1336,42 +1510,64 @@ function paintCanvas() {
   const video = document.querySelector("#video");
   const pip = document.querySelector("#pip");
   const frame = document.querySelector("#canvas");
+  const cropOverlay = document.querySelector("#crop-overlay");
   if (!content || !camera || !video || !frame) return;
-  const ratio = aspectRatio(canvas.aspect, project.media.width, project.media.height);
+  const crop = activeCrop();
+  const mediaW = Number(project.media.width) || 16;
+  const mediaH = Number(project.media.height) || 9;
+  const croppedW = mediaW * (state.cropping ? 1 : crop.width);
+  const croppedH = mediaH * (state.cropping ? 1 : crop.height);
+  const ratio = aspectRatio(canvas.aspect, croppedW, croppedH);
   frame.style.aspectRatio = `${ratio}`;
-  content.style.background = backgroundCss(canvas);
-  const padding = Number(canvas.padding || 0);
-  const scale = Number(canvas.content_scale || 1);
+  content.style.background = state.cropping ? "#111218" : backgroundCss(canvas);
+  const padding = state.cropping ? 0.04 : Number(canvas.padding || 0);
+  const scale = state.cropping ? 1 : Number(canvas.content_scale || 1);
   const width = (1 - padding * 2) * scale * 100;
   camera.style.width = `${width}%`;
-  camera.style.aspectRatio = `${project.media.width} / ${project.media.height}`;
-  camera.style.borderRadius = `${canvas.radius || 0}px`;
-  camera.style.boxShadow = canvas.shadow > 0 ? `0 18px 50px rgba(0,0,0,${0.2 + canvas.shadow * 0.45})` : "none";
-  camera.style.outline = canvas.border > 0 ? `${canvas.border}px solid ${canvas.border_color || "#fff"}` : "none";
+  camera.style.aspectRatio = `${croppedW} / ${croppedH}`;
+  camera.style.borderRadius = state.cropping ? "10px" : `${canvas.radius || 0}px`;
+  camera.style.boxShadow = state.cropping || !(canvas.shadow > 0) ? "none" : `0 18px 50px rgba(0,0,0,${0.2 + canvas.shadow * 0.45})`;
+  camera.style.outline = !state.cropping && canvas.border > 0 ? `${canvas.border}px solid ${canvas.border_color || "#fff"}` : "none";
   const ox = (Number(canvas.content_x ?? 0.5) - 0.5) * padding * 200;
   const oy = (Number(canvas.content_y ?? 0.5) - 0.5) * padding * 200;
-  shell.style.transform = `translate(${ox}%, ${oy}%)`;
-  applyChrome(chrome, canvas);
-  const view = Z.sampleViewport(project.clips, project.zooms, state.time);
-  video.style.transform = `translate(${-view.left / view.size * 100}%, ${-view.top / view.size * 100}%) scale(${1 / view.size})`;
-  const motion = (project.screen_motions || []).map((item) => absoluteItem(item)).find((item) => state.time >= item.start && state.time <= item.end + Number(item.exit || 0));
+  shell.style.transform = state.cropping ? "" : `translate(${ox}%, ${oy}%)`;
+  applyChrome(chrome, state.cropping ? { ...canvas, screen_frame: "none" } : canvas);
+  const view = state.cropping
+    ? { left: 0, top: 0, size: 1 }
+    : Z.sampleViewport(project.clips, project.zooms, state.time);
+  // Compose source crop + zoom viewport into one CSS transform on the video.
+  const scaleX = 1 / (state.cropping ? 1 : crop.width * view.size);
+  const scaleY = 1 / (state.cropping ? 1 : crop.height * view.size);
+  const tx = state.cropping ? 0 : -(crop.x + view.left * crop.width) / (crop.width * view.size) * 100;
+  const ty = state.cropping ? 0 : -(crop.y + view.top * crop.height) / (crop.height * view.size) * 100;
+  video.style.transform = state.cropping
+    ? "none"
+    : `translate(${tx}%, ${ty}%) scale(${scaleX}, ${scaleY})`;
+  video.style.filter = state.previewQuality === "fast" ? "contrast(0.98) saturate(0.92)" : "";
+  const motion = state.cropping ? null : (project.screen_motions || []).map((item) => absoluteItem(item)).find((item) => state.time >= item.start && state.time <= item.end + Number(item.exit || 0));
   if (motion) {
     camera.style.transform = `perspective(${800 + Number(motion.perspective || 0.65) * 400}px) rotateX(${motion.rotation_x || 0}deg) rotateY(${motion.rotation_y || 0}deg) rotateZ(${motion.rotation_z || 0}deg) scale(${motion.scale || 1})`;
   } else {
     camera.style.transform = "";
   }
   const opening = project.opening || {};
-  if (opening.enabled && state.time < Number(opening.duration || 1.4)) {
+  if (!state.cropping && opening.enabled && state.time < Number(opening.duration || 1.4)) {
     const p = state.time / Number(opening.duration || 1.4);
     const startScale = opening.preset === "sideSlide" ? 0.85 : opening.preset === "light3D" ? 0.92 : 0.72;
     shell.style.transform += ` scale(${startScale + (1 - startScale) * p})`;
     if (opening.preset === "light3D") shell.style.transform += ` rotateY(${(-18 + 18 * p)}deg)`;
   }
-  placeCursor(Z.locateTimeline(project.clips, state.time), view);
+  placeCursor(state.cropping ? null : Z.locateTimeline(project.clips, state.time), view);
+  placeFocusDot(view);
+  paintStageOverlays();
+  if (cropOverlay) {
+    cropOverlay.hidden = !state.cropping;
+    if (state.cropping) syncCropOverlay();
+  }
   const cam = project.camera || {};
   if (pip) {
-    pip.hidden = !cam.enabled;
-    if (cam.enabled) {
+    pip.hidden = state.cropping || !cam.enabled;
+    if (!pip.hidden) {
       const size = Number(cam.size || 0.22) * 100;
       pip.style.width = `${size}%`;
       pip.style.aspectRatio = cam.shape === "circle" || cam.shape === "square" ? "1" : cam.shape === "vertical" ? "9/16" : "16/9";
@@ -1379,10 +1575,14 @@ function paintCanvas() {
       pip.style.top = `${Number(cam.y || 0.78) * 100 - size / 2}%`;
       pip.style.borderRadius = cam.shape === "circle" ? "999px" : `${(cam.roundness || 0.2) * 28}px`;
       pip.style.transform = cam.mirror ? "scaleX(-1)" : "";
+      pip.style.opacity = cam.opacity == null ? 1 : Number(cam.opacity);
+      pip.style.borderWidth = `${Number(cam.border || 3)}px`;
+      pip.style.borderColor = cam.border_color || "#fff";
+      pip.style.boxShadow = cam.shadow > 0 ? `0 10px 28px rgba(0,0,0,${0.12 + cam.shadow * 0.35})` : "none";
     }
   }
   const located = Z.locateTimeline(project.clips, state.time);
-  if (located && !state.playing) DogSCPreview.seekCoalesced(located.source, false);
+  if (located && !state.playing) DogSCPreview.seekCoalesced(located.source, state.previewQuality === "full");
   syncTransport();
 }
 
@@ -1412,7 +1612,7 @@ function applyChrome(node, canvas) {
 function placeCursor(located, view) {
   const cursor = document.querySelector("#cursor");
   const asset = state.project.cursor?.asset || "system.arrow";
-  if (!cursor || !located || state.project.capture?.cursor_baked || asset === "system.hidden") {
+  if (!cursor || !located || state.cropping || state.project.capture?.cursor_baked || asset === "system.hidden") {
     if (cursor) cursor.hidden = true;
     return;
   }
@@ -1423,6 +1623,276 @@ function placeCursor(located, view) {
   cursor.style.left = `${Number(event.x) * 100}%`;
   cursor.style.top = `${Number(event.y) * 100}%`;
   cursor.classList.toggle("click", event.kind === "left" && located.source - Number(event.t) < 0.25 && state.project.cursor?.click_effect !== "none");
+}
+
+function placeFocusDot(view) {
+  const focus = document.querySelector("#focus");
+  if (!focus || !state.project) return;
+  const zoom = state.project.zooms?.find((item) => item.id === state.selectedZoom);
+  if (!zoom || state.cropping) {
+    focus.hidden = true;
+    return;
+  }
+  focus.hidden = false;
+  const fx = Number(zoom.focus_x ?? 0.5);
+  const fy = Number(zoom.focus_y ?? 0.5);
+  focus.style.left = `${((fx - view.left) / view.size) * 100}%`;
+  focus.style.top = `${((fy - view.top) / view.size) * 100}%`;
+}
+
+function paintStageOverlays() {
+  const host = document.querySelector("#overlays");
+  if (!host || !state.project || state.cropping) {
+    if (host) host.innerHTML = "";
+    return;
+  }
+  const parts = [];
+  for (const item of (state.project.mosaics || []).map(absoluteItem)) {
+    if (state.time < item.start || state.time > item.end) continue;
+    const intensity = Number(item.intensity || 0.55);
+    const blur = 4 + intensity * 18;
+    parts.push(`<div class="overlay-mosaic ${item.id === state.selectedMosaic?.id ? "selected" : ""}" style="left:${item.x * 100}%;top:${item.y * 100}%;width:${item.width * 100}%;height:${item.height * 100}%;border-radius:${(item.corner_radius || 0.08) * 40}px;backdrop-filter:blur(${blur}px);background:rgba(20,22,28,${0.12 + intensity * 0.25})"></div>`);
+  }
+  for (const item of (state.project.stickers || []).map(absoluteItem)) {
+    if (state.time < item.start || state.time > item.end) continue;
+    parts.push(`<img class="overlay-sticker" src="/api/projects/${state.project.id}/${escapeHtml(item.path)}" alt="" style="left:${item.x * 100}%;top:${item.y * 100}%;width:${item.width * 100}%;opacity:${item.opacity ?? 1};transform:translate(-50%,-50%) rotate(${item.rotation || 0}deg);border-radius:${item.corner_radius || 18}px">`);
+  }
+  host.innerHTML = parts.join("");
+}
+
+function syncCropOverlay() {
+  const rect = document.querySelector("#crop-rect");
+  const overlay = document.querySelector("#crop-overlay");
+  if (!rect || !overlay || !state.cropDraft) return;
+  const crop = clampCrop(state.cropDraft);
+  rect.style.left = `${crop.x * 100}%`;
+  rect.style.top = `${crop.y * 100}%`;
+  rect.style.width = `${crop.width * 100}%`;
+  rect.style.height = `${crop.height * 100}%`;
+  const top = overlay.querySelector('[data-edge="top"]');
+  const left = overlay.querySelector('[data-edge="left"]');
+  const right = overlay.querySelector('[data-edge="right"]');
+  const bottom = overlay.querySelector('[data-edge="bottom"]');
+  if (top) Object.assign(top.style, { left: "0", top: "0", width: "100%", height: `${crop.y * 100}%` });
+  if (bottom) Object.assign(bottom.style, { left: "0", top: `${(crop.y + crop.height) * 100}%`, width: "100%", height: `${(1 - crop.y - crop.height) * 100}%` });
+  if (left) Object.assign(left.style, { left: "0", top: `${crop.y * 100}%`, width: `${crop.x * 100}%`, height: `${crop.height * 100}%` });
+  if (right) Object.assign(right.style, { left: `${(crop.x + crop.width) * 100}%`, top: `${crop.y * 100}%`, width: `${(1 - crop.x - crop.width) * 100}%`, height: `${crop.height * 100}%` });
+}
+
+function syncCropInspector() {
+  const crop = clampCrop(state.cropDraft);
+  const map = {
+    "#crop-left": crop.x,
+    "#crop-top": crop.y,
+    "#crop-width": crop.width,
+    "#crop-height": crop.height,
+  };
+  for (const [selector, value] of Object.entries(map)) {
+    const node = document.querySelector(selector);
+    if (node) node.value = String(value);
+  }
+  document.querySelectorAll("#crop-left, #crop-top, #crop-width, #crop-height").forEach((node) => {
+    const label = node.closest("label")?.querySelector("em");
+    if (label) label.textContent = `${Math.round(Number(node.value) * 100)}%`;
+  });
+}
+
+function bindCropOverlay() {
+  const rect = document.querySelector("#crop-rect");
+  if (!rect) return;
+  const startDrag = (event, mode, handle = null) => {
+    if (!state.cropping) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const camera = document.querySelector("#camera");
+    const origin = clampCrop(state.cropDraft);
+    const box = camera.getBoundingClientRect();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const move = (next) => {
+      const dx = (next.clientX - startX) / Math.max(box.width, 1);
+      const dy = (next.clientY - startY) / Math.max(box.height, 1);
+      let draft = { ...origin };
+      if (mode === "move") {
+        draft.x = origin.x + dx;
+        draft.y = origin.y + dy;
+        draft.x = Math.min(Math.max(draft.x, 0), 1 - draft.width);
+        draft.y = Math.min(Math.max(draft.y, 0), 1 - draft.height);
+      } else {
+        let left = origin.x;
+        let top = origin.y;
+        let right = origin.x + origin.width;
+        let bottom = origin.y + origin.height;
+        if (handle.includes("w")) left = origin.x + dx;
+        if (handle.includes("e")) right = origin.x + origin.width + dx;
+        if (handle.includes("n")) top = origin.y + dy;
+        if (handle.includes("s")) bottom = origin.y + origin.height + dy;
+        left = Math.min(Math.max(left, 0), 0.98);
+        top = Math.min(Math.max(top, 0), 0.98);
+        right = Math.min(Math.max(right, left + 0.02), 1);
+        bottom = Math.min(Math.max(bottom, top + 0.02), 1);
+        draft = clampCrop({ x: left, y: top, width: right - left, height: bottom - top });
+      }
+      state.cropDraft = clampCrop(draft);
+      syncCropOverlay();
+      syncCropInspector();
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  rect.onpointerdown = (event) => {
+    if (event.target.dataset.handle) return;
+    startDrag(event, "move");
+  };
+  rect.querySelectorAll("[data-handle]").forEach((node) => {
+    node.onpointerdown = (event) => startDrag(event, "resize", node.dataset.handle);
+  });
+}
+
+function bindSplitters() {
+  const vertical = document.querySelector("#splitter-v");
+  const horizontal = document.querySelector("#splitter-h");
+  vertical?.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    const workspace = document.querySelector(".workspace");
+    if (!workspace) return;
+    const move = (next) => {
+      const rect = workspace.getBoundingClientRect();
+      const width = Math.min(Math.max(rect.right - next.clientX, 340), 480);
+      state.inspectorWidth = width;
+      localStorage.setItem("dogsc-inspector-w", String(width));
+      workspace.style.setProperty("--inspector-w", `${width}px`);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      paintCanvas();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  });
+  horizontal?.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    const editor = document.querySelector(".editor");
+    if (!editor) return;
+    const move = (next) => {
+      const rect = editor.getBoundingClientRect();
+      const height = Math.min(Math.max(rect.bottom - next.clientY, 180), 420);
+      state.timelineHeight = height;
+      localStorage.setItem("dogsc-timeline-h", String(height));
+      editor.style.setProperty("--timeline-h", `${height}px`);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      drawTimeline();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  });
+}
+
+async function ensurePeaks() {
+  if (!state.project) return;
+  if (state.peaksProjectId === state.project.id && Array.isArray(state.peaks)) return;
+  const payload = await api(`/api/projects/${state.project.id}/peaks`);
+  state.peaks = payload.peaks || [];
+  state.peaksProjectId = state.project.id;
+}
+
+async function ensureCameraPip() {
+  const video = document.querySelector("#pip-video");
+  const cam = state.project?.camera || {};
+  if (!video) return;
+  if (!cam.enabled) {
+    if (state.cameraStream) {
+      state.cameraStream.getTracks().forEach((track) => track.stop());
+      state.cameraStream = null;
+      video.srcObject = null;
+    }
+    return;
+  }
+  if (!navigator.mediaDevices?.getUserMedia) return;
+  try {
+    if (!state.cameraStream) {
+      state.cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    }
+    video.srcObject = state.cameraStream;
+    video.play().catch(() => {});
+  } catch (_) {
+    /* Camera optional in headless / denied environments. */
+  }
+}
+
+async function openExportSheet() {
+  if (state.cropping) return;
+  state.exportSheet = { state: "idle", progress: 0, estimate: null, error: null };
+  render();
+  await refreshExportEstimate();
+}
+
+async function refreshExportEstimate() {
+  if (!state.project || !state.exportSheet) return;
+  try {
+    const estimate = await api(`/api/projects/${state.project.id}/export/estimate`);
+    if (!state.exportSheet) return;
+    state.exportSheet.estimate = estimate;
+    const meta = document.querySelector(".export-meta");
+    if (meta) {
+      meta.innerHTML = `<div><span>${state.lang === "zh" ? "分辨率" : "Size"}</span><strong>${estimate.width}×${estimate.height}</strong></div>
+        <div><span>${state.lang === "zh" ? "时长" : "Duration"}</span><strong>${formatTime(estimate.duration)}</strong></div>
+        <div><span>${state.lang === "zh" ? "估大小" : "Est."}</span><strong>${formatBytes(estimate.bytes)}</strong></div>`;
+    }
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function startExportFromSheet() {
+  if (!state.exportSheet || !state.project) return;
+  state.exportSheet.state = "running";
+  state.exportSheet.progress = 0.02;
+  state.exportSheet.error = null;
+  render();
+  try {
+    await api(`/api/projects/${state.project.id}/export`, { method: "POST", body: {} });
+    for (let attempt = 0; attempt < 600; attempt += 1) {
+      const status = await api(`/api/projects/${state.project.id}/export/status`);
+      if (!state.exportSheet) return;
+      state.exportSheet.progress = Math.min(0.95, 0.05 + attempt / 120);
+      const bar = document.querySelector(".export-progress i");
+      if (bar) bar.style.width = `${Math.round(state.exportSheet.progress * 100)}%`;
+      if (status.state === "done") {
+        state.exportSheet.progress = 1;
+        state.exportSheet.state = "done";
+        toast(state.lang === "zh" ? "导出完成" : "Export ready");
+        const link = document.createElement("a");
+        link.href = `/api/projects/${state.project.id}/export/file`;
+        link.download = `${state.project.name || "dogsc"}.mp4`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        state.exportSheet = null;
+        render();
+        return;
+      }
+      if (status.state === "error") throw new Error(status.error || "导出失败");
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+    throw new Error(state.lang === "zh" ? "导出时间太长，请稍后再看状态。" : "Export is still running.");
+  } catch (error) {
+    if (state.exportSheet) {
+      state.exportSheet.state = "error";
+      state.exportSheet.error = error.message;
+      render();
+    } else {
+      toast(error.message);
+    }
+  }
 }
 
 function absoluteItem(item) {
@@ -1436,6 +1906,9 @@ function absoluteItem(item) {
 function drawTimeline() {
   const lanes = document.querySelector("#lanes");
   if (!lanes || !state.project) return;
+  if (state.timelineMode === "waveform" && state.peaksProjectId !== state.project.id) {
+    ensurePeaks().then(() => drawTimeline()).catch(() => {});
+  }
   const duration = Math.max(Z.duration(state.project.clips), 0.1);
   const pxPerSecond = 120 * state.timelineZoom;
   const width = Math.max(lanes.clientWidth - 100, duration * pxPerSecond);
@@ -1475,15 +1948,43 @@ function drawTimeline() {
     node.innerHTML = `<span class="handle left"></span><span class="handle right"></span>`;
     if (state.timelineMode === "waveform") {
       node.style.background = "linear-gradient(180deg,#3a3d44,#2a2d33)";
-      const wave = document.createElement("div");
-      wave.style.cssText = "position:absolute;inset:8px 6px;opacity:0.75;background:repeating-linear-gradient(90deg,transparent 0 3px,rgba(133,209,66,0.55) 3px 4px)";
-      node.append(wave);
+      const canvas = document.createElement("canvas");
+      canvas.className = "wave-canvas";
+      canvas.width = 240;
+      canvas.height = 34;
+      node.append(canvas);
+      const peaks = state.peaks || [];
+      const ctx = canvas.getContext("2d");
+      if (ctx && peaks.length) {
+        const mediaDuration = Math.max(Number(state.project.media?.duration) || duration, 0.1);
+        const srcIn = Number(row.clip.src_in || 0);
+        const srcOut = Number(row.clip.src_out || srcIn + row.duration);
+        const from = Math.floor((srcIn / mediaDuration) * peaks.length);
+        const to = Math.max(Math.ceil((srcOut / mediaDuration) * peaks.length), from + 1);
+        const slice = peaks.slice(from, to);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "rgba(133,209,66,0.75)";
+        const mid = canvas.height / 2;
+        slice.forEach((peak, index) => {
+          const x = (index / Math.max(slice.length - 1, 1)) * canvas.width;
+          const h = Math.max(peak * (canvas.height * 0.9), 1.5);
+          ctx.fillRect(x, mid - h / 2, Math.max(canvas.width / slice.length - 0.6, 1), h);
+        });
+      }
     } else {
-      for (let index = 0; index < 8; index += 1) {
+      const cells = Math.min(Math.max(Math.ceil((row.duration / duration) * width / 40), 4), 24);
+      const srcIn = Number(row.clip.src_in || 0);
+      const srcOut = Number(row.clip.src_out || srcIn + row.duration);
+      for (let index = 0; index < cells; index += 1) {
         const image = document.createElement("img");
-        image.src = `/api/projects/${state.project.id}/thumbs/${index}.jpg`;
+        const local = srcIn + ((index + 0.5) / cells) * (srcOut - srcIn);
+        image.src = `/api/projects/${state.project.id}/thumb?t=${local.toFixed(3)}`;
         image.alt = "";
-        image.onerror = () => image.remove();
+        image.loading = "lazy";
+        image.onerror = () => {
+          image.src = `/api/projects/${state.project.id}/thumbs/${Math.min(index, 7)}.jpg`;
+          image.onerror = () => image.remove();
+        };
         node.append(image);
       }
     }
@@ -1561,8 +2062,11 @@ function drawTimeline() {
     }
     return points.filter((t) => t >= 0 && t <= duration);
   };
-  const magneticTime = (time, laneWidth) => {
-    if (!state.magnetic) return time;
+  const magneticTime = (time, laneWidth, showGuide = false) => {
+    if (!state.magnetic) {
+      state.snapGuide = null;
+      return time;
+    }
     const pps = laneWidth / Math.max(duration, 0.001);
     const threshold = 8 / pps; // Apple-like ~8px snap radius
     let best = time;
@@ -1574,6 +2078,8 @@ function drawTimeline() {
         best = point;
       }
     }
+    state.snapGuide = bestDist < threshold ? best : null;
+    if (!showGuide) return best;
     return best;
   };
   lanes.innerHTML = "";
@@ -1585,6 +2091,12 @@ function drawTimeline() {
   head.dataset.laneWidth = String(width);
   head.style.left = `calc(76px + ${(state.time / duration) * width}px)`;
   lanes.append(head);
+  if (state.snapGuide != null) {
+    const guide = document.createElement("div");
+    guide.className = "snap-guide";
+    guide.style.left = `calc(76px + ${(state.snapGuide / duration) * width}px)`;
+    lanes.append(guide);
+  }
   state.project.markers.forEach((marker) => {
     const row = rows.find((item) => item.id === marker.clip_id);
     if (!row) return;
@@ -1596,10 +2108,22 @@ function drawTimeline() {
   const seek = (event, lane, exact = false) => {
     const rect = lane.getBoundingClientRect();
     let time = Z.clamp((event.clientX - rect.left) / rect.width, 0, 1) * duration;
-    time = magneticTime(time, rect.width);
+    time = magneticTime(time, rect.width, true);
     state.time = time;
     state.playing = false;
     updatePlayButton();
+    const guide = document.querySelector(".snap-guide");
+    if (state.snapGuide != null) {
+      if (guide) guide.style.left = `calc(76px + ${(state.snapGuide / duration) * width}px)`;
+      else {
+        const node = document.createElement("div");
+        node.className = "snap-guide";
+        node.style.left = `calc(76px + ${(state.snapGuide / duration) * width}px)`;
+        lanes.append(node);
+      }
+    } else if (guide) {
+      guide.remove();
+    }
     const located = Z.locateTimeline(state.project.clips, state.time);
     if (located) DogSCPreview.seekCoalesced(located.source, exact);
     paintCanvas();
@@ -1636,12 +2160,54 @@ function dragEdge(event, row, edge, duration, width) {
   event.stopPropagation();
   const startX = event.clientX;
   const origin = edge === "start" ? row.start : row.end;
+  const lanes = document.querySelector("#lanes");
+  const magneticTargets = () => {
+    const points = [0, duration];
+    for (const clip of Z.layout(state.project.clips)) {
+      if (clip.id === row.id) continue;
+      points.push(clip.start, clip.start + clip.duration);
+    }
+    for (const zoom of Z.absoluteZooms(state.project.clips, state.project.zooms)) {
+      points.push(Number(zoom.start), Number(zoom.end));
+    }
+    return points;
+  };
+  const snap = (time) => {
+    if (!state.magnetic) {
+      state.snapGuide = null;
+      return time;
+    }
+    const threshold = 8 / (width / Math.max(duration, 0.001));
+    let best = time;
+    let bestDist = threshold;
+    for (const point of magneticTargets()) {
+      const dist = Math.abs(point - time);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = point;
+      }
+    }
+    state.snapGuide = bestDist < threshold ? best : null;
+    const guide = document.querySelector(".snap-guide");
+    if (state.snapGuide != null && lanes) {
+      if (guide) guide.style.left = `calc(76px + ${(state.snapGuide / duration) * width}px)`;
+      else {
+        const node = document.createElement("div");
+        node.className = "snap-guide";
+        node.style.left = `calc(76px + ${(state.snapGuide / duration) * width}px)`;
+        lanes.append(node);
+      }
+    } else if (guide) guide.remove();
+    return best;
+  };
   const move = (next) => {
     const delta = (next.clientX - startX) / width * duration;
-    const time = Z.clamp(origin + delta, 0, duration);
+    const time = snap(Z.clamp(origin + delta, 0, duration));
     mutate(`/api/projects/${state.project.id}/trim`, { id: row.id, edge, time });
   };
   const up = () => {
+    state.snapGuide = null;
+    document.querySelector(".snap-guide")?.remove();
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", up);
   };
@@ -1685,31 +2251,7 @@ function togglePlay() {
 }
 
 async function exportProject() {
-  const button = document.querySelector("#export");
-  if (button) {
-    button.disabled = true;
-    DogSCMotion.press(button);
-  }
-  try {
-    await api(`/api/projects/${state.project.id}/export`, { method: "POST", body: {} });
-    for (let attempt = 0; attempt < 600; attempt += 1) {
-      const status = await api(`/api/projects/${state.project.id}/export/status`);
-      if (status.state === "done") {
-        toast(state.lang === "zh" ? "导出完成" : "Export ready");
-        const link = document.createElement("a");
-        link.href = `/api/projects/${state.project.id}/export/file`;
-        link.download = `${state.project.name || "dogsc"}.mp4`;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        return;
-      }
-      if (status.state === "error") throw new Error(status.error || "导出失败");
-      await new Promise((resolve) => setTimeout(resolve, 400));
-    }
-    throw new Error(state.lang === "zh" ? "导出时间太长，请稍后再看状态。" : "Export is still running.");
-  } catch (error) { toast(error.message); }
-  finally { if (button?.isConnected) button.disabled = false; }
+  return openExportSheet();
 }
 
 function aspectRatio(aspect, width, height) {
