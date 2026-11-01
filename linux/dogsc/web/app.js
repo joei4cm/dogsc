@@ -297,7 +297,13 @@ function syncTransport() {
   const clock = document.querySelector("#clock");
   if (clock) clock.innerHTML = `${formatTime(state.time)} <em>/ ${formatTime(Z.duration(state.project.clips))}</em>`;
   const head = document.querySelector(".playhead");
-  if (head) head.style.left = `${(state.time / total) * 100}%`;
+  if (!head) return;
+  if (head.classList.contains("playhead-span")) {
+    const width = Number(head.dataset.laneWidth || 0);
+    head.style.left = `calc(76px + ${(state.time / total) * width}px)`;
+  } else {
+    head.style.left = `${(state.time / total) * 100}%`;
+  }
 }
 function closeFloatingUI() {
   let changed = false;
@@ -1540,10 +1546,45 @@ function drawTimeline() {
     hint.textContent = state.lang === "zh" ? "空" : "Empty";
     stickerLane.lane.append(hint);
   }
+  const magneticTargets = () => {
+    const points = [0, duration];
+    for (const row of rows) points.push(row.start, row.start + row.duration);
+    for (const zoom of Z.absoluteZooms(state.project.clips, state.project.zooms)) {
+      points.push(Number(zoom.start), Number(zoom.end));
+    }
+    for (const item of motions) points.push(Number(item.start), Number(item.end));
+    for (const item of mosaics) points.push(Number(item.start), Number(item.end));
+    for (const item of stickers) points.push(Number(item.start), Number(item.end));
+    for (const marker of state.project.markers || []) {
+      const row = rows.find((item) => item.id === marker.clip_id);
+      if (row) points.push(row.start + Number(marker.local || 0));
+    }
+    return points.filter((t) => t >= 0 && t <= duration);
+  };
+  const magneticTime = (time, laneWidth) => {
+    if (!state.magnetic) return time;
+    const pps = laneWidth / Math.max(duration, 0.001);
+    const threshold = 8 / pps; // Apple-like ~8px snap radius
+    let best = time;
+    let bestDist = threshold;
+    for (const point of magneticTargets()) {
+      const dist = Math.abs(point - time);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = point;
+      }
+    }
+    return best;
+  };
+  lanes.innerHTML = "";
+  lanes.append(ruler);
+  [clipLane, zoomLane, motionLane, mosaicLane, stickerLane].forEach((entry) => lanes.append(entry.wrap));
+  // Full-height playhead overlay across ruler + all lanes (Apple NativeTimelinePlayheadView)
   const head = document.createElement("div");
-  head.className = "playhead";
-  head.style.left = `${(state.time / duration) * 100}%`;
-  clipLane.lane.append(head);
+  head.className = "playhead playhead-span";
+  head.dataset.laneWidth = String(width);
+  head.style.left = `calc(76px + ${(state.time / duration) * width}px)`;
+  lanes.append(head);
   state.project.markers.forEach((marker) => {
     const row = rows.find((item) => item.id === marker.clip_id);
     if (!row) return;
@@ -1552,22 +1593,19 @@ function drawTimeline() {
     tick.style.left = `${((row.start + Number(marker.local)) / duration) * 100}%`;
     clipLane.lane.append(tick);
   });
-  lanes.innerHTML = "";
-  lanes.append(ruler);
-  [clipLane, zoomLane, motionLane, mosaicLane, stickerLane].forEach((entry) => lanes.append(entry.wrap));
   const seek = (event, lane, exact = false) => {
     const rect = lane.getBoundingClientRect();
     let time = Z.clamp((event.clientX - rect.left) / rect.width, 0, 1) * duration;
-    if (state.magnetic) time = Math.round(time * 10) / 10;
+    time = magneticTime(time, rect.width);
     state.time = time;
     state.playing = false;
+    updatePlayButton();
     const located = Z.locateTimeline(state.project.clips, state.time);
     if (located) DogSCPreview.seekCoalesced(located.source, exact);
     paintCanvas();
-    head.style.left = `${(state.time / duration) * 100}%`;
   };
   clipLane.lane.onpointerdown = (event) => {
-    if (event.target.closest(".handle, .zoom, .motion, .mosaic, .sticker-clip")) return;
+    if (event.target.closest(".handle, .zoom, .motion, .mosaic, .sticker-clip, .lane-empty")) return;
     seek(event, clipLane.lane, false);
     const move = (next) => seek(next, clipLane.lane, false);
     const up = () => {

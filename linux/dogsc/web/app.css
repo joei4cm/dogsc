@@ -44,8 +44,9 @@
   --island-outline: rgba(26, 31, 46, 0.075);
   --edge-top: rgba(255, 255, 255, 1);
   --edge-bottom: rgba(0, 0, 0, 0.07);
-  --contact-shadow: 0 0.5px 1px rgba(26, 31, 46, 0.06);
-  --soft-shadow: 0 6px 18px rgba(26, 31, 46, 0.11);
+  /* Apple EditorFloatingSurface: contact r1.5/y1, soft r18/y9, ambient r44/y22 */
+  --contact-shadow: 0 1px 1.5px rgba(26, 31, 46, 0.06);
+  --soft-shadow: 0 9px 18px rgba(26, 31, 46, 0.11);
   --ambient-shadow: 0 22px 44px rgba(26, 31, 46, 0.07);
   --island-shadow: var(--contact-shadow), var(--soft-shadow), var(--ambient-shadow);
   --lift-shadow: 0 10px 22px rgba(0, 0, 0, 0.14);
@@ -151,7 +152,8 @@ input[type="range"]::-moz-range-thumb {
 }
 .btn.primary:active { transform: scale(0.97); filter: brightness(1.02); }
 .btn:hover { background: var(--selection); }
-.btn:active { transform: scale(0.97); }
+.btn:active { transform: scale(0.96); }
+.btn.icon:active { transform: scale(0.92); }
 .btn.primary {
   background: linear-gradient(180deg, #2a2a2a, var(--platinum-deep));
   color: var(--on-accent);
@@ -186,9 +188,11 @@ input[type="range"]::-moz-range-thumb {
 }
 .home-shell::before {
   content: "";
-  position: absolute; inset: 0; pointer-events: none; opacity: 0.55;
-  background-image: radial-gradient(circle, rgba(0,0,0,0.13) 0.75px, transparent 0.85px);
-  background-size: 18px 18px;
+  position: absolute; inset: 0; pointer-events: none; opacity: 1;
+  background-image: radial-gradient(circle, rgba(0,0,0,0.11) 0.6px, transparent 0.7px);
+  background-size: 24px 24px;
+  background-position: 12px 12px;
+  mask-image: radial-gradient(ellipse at 50% 42%, #000 40%, transparent 78%);
 }
 .topbar {
   position: relative; z-index: 2;
@@ -346,7 +350,9 @@ input[type="range"]::-moz-range-thumb {
 .rec-toggle, .mode-wheel, .record-go, .hud-btn, .play-btn, .tl-tool {
   transition: background-color 0.15s ease-out, color 0.15s ease-out, transform 0.24s cubic-bezier(0.2, 1, 0.3, 1);
 }
-.rec-toggle:active, .hud-btn:active, .tl-tool:active, .play-btn:active { transform: scale(0.96); }
+/* Apple RecorderPressFeedback: pills 0.96, icons 0.92 */
+.mode-wheel:active, .play-btn:active, .record-go:active { transform: scale(0.96); }
+.rec-toggle:active, .hud-btn:active, .tl-tool:active, .btn.icon:active { transform: scale(0.92); }
 .stage-hud { will-change: transform; }
 @media (prefers-reduced-motion: reduce) {
   .inspector-rail .rail-thumb,
@@ -497,7 +503,8 @@ input[type="range"]::-moz-range-thumb {
 .workspace {
   min-height: 0;
   display: grid;
-  grid-template-columns: 1fr 318px;
+  /* Apple inspector default 384 (clamp 340–480); web uses 360 for stage budget */
+  grid-template-columns: 1fr 360px;
 }
 .stage {
   min-width: 0; min-height: 0;
@@ -510,10 +517,12 @@ input[type="range"]::-moz-range-thumb {
     var(--stage);
 }
 .stage-dots {
+  /* Apple EditorWorkspaceGrid: stride 24, dot 1.2, light α0.11, origin 12 */
   position: absolute; inset: 0; pointer-events: none;
-  background-image: radial-gradient(circle, rgba(0,0,0,0.13) 0.75px, transparent 0.85px);
-  background-size: 18px 18px;
-  opacity: 0.85;
+  background-image: radial-gradient(circle, rgba(0,0,0,0.11) 0.6px, transparent 0.7px);
+  background-size: 24px 24px;
+  background-position: 12px 12px;
+  opacity: 1;
   mask-image: radial-gradient(ellipse at 50% 45%, #000 35%, transparent 78%);
 }
 .canvas-frame {
@@ -903,6 +912,10 @@ input[type="range"]::-moz-range-thumb {
   position: absolute; top: 0; bottom: 0; width: 2px; background: var(--red);
   pointer-events: none; z-index: 3;
   box-shadow: 0 0 0 1px rgba(255,69,59,0.15);
+}
+.playhead-span {
+  top: 0; bottom: 0; z-index: 5;
+  margin-left: -1px;
 }
 .marker { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--amber); }
 .ruler {
