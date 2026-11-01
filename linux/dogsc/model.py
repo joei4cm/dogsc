@@ -20,7 +20,7 @@ ASPECTS = (
 RESOLUTIONS = ("source", "1080p", "1440p", "4k")
 EASINGS = ("linear", "quadratic", "cubic", "quintic", "spring")
 FRAME_STYLES = ("none", "windowLight", "windowDark", "browserLight", "browserDark", "devicePhone")
-BACKGROUND_KINDS = ("solid", "pattern", "dynamic")
+BACKGROUND_KINDS = ("solid", "pattern", "dynamic", "image")
 PATTERN_PRESETS = (
     "obsidianGrid",
     "engineeringWhiteGrid",
@@ -71,6 +71,7 @@ def blank_canvas() -> dict:
         "border_opacity": 0.18,
         "background_kind": "solid",
         "background": "#16161a",
+        "background_image": None,
         "pattern": "obsidianGrid",
         "pattern_scale": 1.0,
         "pattern_opacity": 1.0,
@@ -227,6 +228,7 @@ def migrate(project: dict) -> dict:
     project.setdefault("stickers", [])
     project.setdefault("history", [])
     project.setdefault("history_index", -1)
+    project.setdefault("deleted_clips", [])
     clips = []
     for clip in project.get("clips") or []:
         row = dict(clip)

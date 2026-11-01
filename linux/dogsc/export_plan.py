@@ -536,6 +536,24 @@ def _render_background(path: Path, canvas: dict, width: int, height: int) -> Non
     if kind == "dynamic":
         dynamic_png(path, width, height, str(canvas.get("dynamic") or "auroraFluid"))
         return
+    if kind == "image":
+        from dogsc.wallpapers import resolve_wallpaper
+        source = resolve_wallpaper(str(canvas.get("background_image") or ""))
+        if source and source.is_file():
+            completed = subprocess.run(
+                [
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "-i", str(source),
+                    "-vf", f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}",
+                    str(path),
+                ],
+                check=False,
+                capture_output=True,
+            )
+            if completed.returncode == 0 and path.is_file():
+                return
+        solid_color(path, width, height, str(canvas.get("background") or "#16161a"))
+        return
     solid_color(path, width, height, str(canvas.get("background") or "#16161a"))
 
 

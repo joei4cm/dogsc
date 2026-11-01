@@ -33,6 +33,8 @@ const state = {
   peaks: null,
   peaksProjectId: null,
   cameraStream: null,
+  wallpapers: null,
+  selectedMarker: null,
   timelineMode: "picture",
   magnetic: true,
   hoverPreview: true,
@@ -456,26 +458,33 @@ async function api(path, options = {}) {
   return payload;
 }
 
-function render() {
-  const app = document.querySelector("#app");
-  if (state.view === "home" || state.view === "record") app.innerHTML = homeHtml();
-  else app.innerHTML = editorHtml();
-  bind();
-  if (state.view === "editor") {
-    mountPreview();
-    drawTimeline();
-    paintCanvas();
-    requestAnimationFrame(() => {
-      const rail = document.querySelector(".inspector-rail");
-      const active = rail?.querySelector("button.active");
-      DogSCMotion.slideThumb(rail, active);
-      DogSCMotion.syncSegments();
-    });
-  } else {
-    requestAnimationFrame(() => DogSCMotion.syncSegments());
+function render(options = {}) {
+  const paint = () => {
+    const app = document.querySelector("#app");
+    if (state.view === "home" || state.view === "record") app.innerHTML = homeHtml();
+    else app.innerHTML = editorHtml();
+    bind();
+    if (state.view === "editor") {
+      mountPreview();
+      drawTimeline();
+      paintCanvas();
+      requestAnimationFrame(() => {
+        const rail = document.querySelector(".inspector-rail");
+        const active = rail?.querySelector("button.active");
+        DogSCMotion.slideThumb(rail, active);
+        DogSCMotion.syncSegments();
+      });
+    } else {
+      requestAnimationFrame(() => DogSCMotion.syncSegments());
+    }
+    const pill = document.querySelector("#platform-pill");
+    if (pill && state.env) pill.textContent = `${state.env.os_name?.split(" ")[0] || "Linux"} · ${state.env.backend_label || state.env.backend}`;
+  };
+  if (options.transition && document.startViewTransition && !DogSCMotion.reduces()) {
+    const transition = document.startViewTransition(paint);
+    return transition.finished.catch(() => {});
   }
-  const pill = document.querySelector("#platform-pill");
-  if (pill && state.env) pill.textContent = `${state.env.os_name?.split(" ")[0] || "Linux"} · ${state.env.backend_label || state.env.backend}`;
+  paint();
 }
 
 function sourceLabel(kind) {
@@ -805,16 +814,28 @@ function backgroundPanel(canvas) {
     ["#16161a", "深墨"], ["#0b1c2c", "午夜"], ["#1d2430", "石墨"],
     ["#203040", "海雾"], ["#2c241c", "暖褐"], ["#f4f1ea", "宣纸"],
   ];
+  const system = state.wallpapers || [];
+  const systemGrid = system.length ? `
+    <div class="section-title" style="margin-top:12px">${state.lang === "zh" ? "系统壁纸" : "System"}</div>
+    <div class="preset-grid wallpaper-grid system-wallpapers">
+      ${system.map((item) => `<button class="tile image-tile ${canvas.background_kind === "image" && canvas.background_image === item.url ? "active" : ""}" data-wallpaper="${escapeHtml(item.url)}" style="background-image:url('${escapeHtml(item.url)}')"><span>${escapeHtml(item.name)}</span></button>`).join("")}
+    </div>` : `<p class="note">${state.lang === "zh" ? "未找到系统壁纸目录（~/.local/share/backgrounds 等）。" : "No system wallpaper folders found."}</p>`;
   return `
     <div class="section-title">${state.lang === "zh" ? "背景素材" : "Background"}</div>
     <div class="segmented" style="margin-bottom:12px">
       ${["wallpaper","pattern","dynamic","custom"].map((id) => `<button data-bg-tab="${id}" class="${state.bgTab === id ? "active" : ""}">${t(id)}</button>`).join("")}
     </div>
-    ${state.bgTab === "wallpaper" || state.bgTab === "custom" ? `
+    ${state.bgTab === "wallpaper" ? `
       <div class="preset-grid wallpaper-grid">
-        ${solids.map(([color, label]) => `<button class="tile ${canvas.background === color && !canvas.pattern && !canvas.dynamic ? "active" : ""}" data-color="${color}" style="background:${color}"><span>${state.lang === "zh" ? label : color}</span></button>`).join("")}
+        ${solids.map(([color, label]) => `<button class="tile ${canvas.background_kind !== "image" && canvas.background === color && canvas.background_kind !== "pattern" && canvas.background_kind !== "dynamic" ? "active" : ""}" data-color="${color}" style="background:${color}"><span>${state.lang === "zh" ? label : color}</span></button>`).join("")}
       </div>
-      <label class="field">${fieldValue(t("background"), "")}<input id="background" type="color" value="${canvas.background || "#16161a"}"></label>` : ""}
+      ${systemGrid}` : ""}
+    ${state.bgTab === "custom" ? `
+      <div class="preset-grid wallpaper-grid">
+        ${solids.map(([color, label]) => `<button class="tile ${canvas.background_kind !== "image" && canvas.background === color ? "active" : ""}" data-color="${color}" style="background:${color}"><span>${state.lang === "zh" ? label : color}</span></button>`).join("")}
+      </div>
+      <label class="field">${fieldValue(t("background"), "")}<input id="background" type="color" value="${canvas.background || "#16161a"}"></label>
+      ${systemGrid}` : ""}
     ${state.bgTab === "pattern" ? `
       <div class="preset-grid wallpaper-grid">
         ${Object.keys(PATTERN_LABELS.zh).map((id) => `<button class="tile ${canvas.pattern === id ? "active" : ""}" data-pattern="${id}" style="background:${patternPreview(id)}"><span>${PATTERN_LABELS[state.lang][id]}</span></button>`).join("")}
@@ -838,10 +859,22 @@ function layoutPanel(canvas) {
     <label class="field">${fieldValue(state.lang === "zh" ? "垂直位置" : "Y", `${Math.round((canvas.content_y ?? 0.5) * 100)}%`)}<input id="content-y" type="range" min="0" max="1" step="0.01" value="${canvas.content_y ?? 0.5}"></label>`;
 }
 
+function mockupSilhouette(id) {
+  if (id === "none") return `<span class="mock-sil none"></span>`;
+  if (id === "devicePhone") return `<span class="mock-sil phone"><i></i></span>`;
+  if (String(id).startsWith("browser")) return `<span class="mock-sil browser ${String(id).endsWith("Dark") ? "dark" : ""}"><i></i><em></em></span>`;
+  return `<span class="mock-sil window ${String(id).endsWith("Dark") ? "dark" : ""}"><i></i><i></i><i></i></span>`;
+}
+
 function mockupPanel(canvas) {
+  const ids = Object.keys(FRAME_LABELS.zh);
   return `
-    <div class="section mockup-list">
-      ${Object.keys(FRAME_LABELS.zh).map((id) => `<button class="choice-card ${canvas.screen_frame === id ? "active" : ""}" data-frame="${id}"><strong>${FRAME_LABELS[state.lang][id]}</strong></button>`).join("")}
+    <div class="section-title">${state.lang === "zh" ? "样机转盘" : "Mockup wheel"}</div>
+    <div class="mockup-wheel" id="mockup-wheel">
+      ${ids.map((id) => `<button class="mockup-card ${canvas.screen_frame === id ? "active" : ""}" data-frame="${id}">
+        ${mockupSilhouette(id)}
+        <strong>${FRAME_LABELS[state.lang][id]}</strong>
+      </button>`).join("")}
     </div>
     <label class="field">${fieldValue(state.lang === "zh" ? "框体比例" : "Frame", `${Number(canvas.frame_scale || 1).toFixed(2)}x`)}<input id="frame-scale" type="range" min="0.6" max="1.6" step="0.05" value="${canvas.frame_scale || 1}"></label>
     <label class="field">${fieldValue(state.lang === "zh" ? "顶栏高度" : "Toolbar", `${Number(canvas.toolbar_scale || 1).toFixed(2)}x`)}<input id="toolbar-scale" type="range" min="0.65" max="1.6" step="0.05" value="${canvas.toolbar_scale || 1}"></label>
@@ -1129,7 +1162,7 @@ function bind() {
     state.project = null;
     state.playing = false;
     state.hudMenu = null;
-    loadSources().then(render);
+    loadSources().then(() => render({ transition: true }));
   };
   document.querySelector("#delete-project")?.addEventListener("click", async () => {
     const name = state.project?.name || (state.lang === "zh" ? "未命名" : "Untitled");
@@ -1207,7 +1240,17 @@ function bind() {
     const clip = Z.locateTimeline(state.project.clips, state.time)?.clip;
     if (clip) mutate(`/api/projects/${state.project.id}/delete-clip`, { id: clip.id });
   });
-  document.querySelector("#restore-cuts")?.addEventListener("click", () => toast(state.lang === "zh" ? "暂无已删除剪辑可恢复" : "No deleted cuts to restore"));
+  document.querySelector("#restore-cuts")?.addEventListener("click", async () => {
+    if (!(state.project.deleted_clips || []).length) {
+      toast(state.lang === "zh" ? "暂无已删除剪辑可恢复" : "No deleted cuts to restore");
+      return;
+    }
+    try {
+      state.project = await api(`/api/projects/${state.project.id}/restore-clip`, { method: "POST", body: {} });
+      toast(state.lang === "zh" ? "已恢复剪辑" : "Cut restored");
+      render();
+    } catch (error) { toast(error.message); }
+  });
   document.querySelector("#add-zoom")?.addEventListener("click", () => mutate(`/api/projects/${state.project.id}/zoom`, { time: state.time, focus_x: 0.5, focus_y: 0.5, scale: 1.6 }));
   document.querySelector("#auto-zoom")?.addEventListener("click", () => mutate(`/api/projects/${state.project.id}/zoom-auto`, {}));
   document.querySelector("#add-tilt")?.addEventListener("click", () => mutate(`/api/projects/${state.project.id}/screen-motion`, { time: state.time, rotation_x: 12, rotation_y: -10 }));
@@ -1277,10 +1320,22 @@ function bind() {
     const kind = state.bgTab === "pattern" ? "pattern" : state.bgTab === "dynamic" ? "dynamic" : "solid";
     meta({ canvas: { ...state.project.canvas, background_kind: kind } });
   });
-  document.querySelectorAll("[data-color]").forEach((node) => node.onclick = () => meta({ canvas: { ...state.project.canvas, background_kind: "solid", background: node.dataset.color } }));
-  document.querySelectorAll("[data-pattern]").forEach((node) => node.onclick = () => meta({ canvas: { ...state.project.canvas, background_kind: "pattern", pattern: node.dataset.pattern } }));
-  document.querySelectorAll("[data-dynamic]").forEach((node) => node.onclick = () => meta({ canvas: { ...state.project.canvas, background_kind: "dynamic", dynamic: node.dataset.dynamic } }));
-  document.querySelectorAll("[data-frame]").forEach((node) => node.onclick = () => meta({ canvas: { ...state.project.canvas, screen_frame: node.dataset.frame } }));
+  document.querySelectorAll("[data-color]").forEach((node) => node.onclick = () => meta({ canvas: { ...state.project.canvas, background_kind: "solid", background: node.dataset.color, background_image: null } }));
+  document.querySelectorAll("[data-wallpaper]").forEach((node) => node.onclick = () => meta({ canvas: { ...state.project.canvas, background_kind: "image", background_image: node.dataset.wallpaper } }));
+  document.querySelectorAll("[data-pattern]").forEach((node) => node.onclick = () => meta({ canvas: { ...state.project.canvas, background_kind: "pattern", pattern: node.dataset.pattern, background_image: null } }));
+  document.querySelectorAll("[data-dynamic]").forEach((node) => node.onclick = () => meta({ canvas: { ...state.project.canvas, background_kind: "dynamic", dynamic: node.dataset.dynamic, background_image: null } }));
+  document.querySelectorAll("[data-frame]").forEach((node) => node.onclick = () => {
+    meta({ canvas: { ...state.project.canvas, screen_frame: node.dataset.frame } });
+    requestAnimationFrame(() => {
+      node.scrollIntoView({ inline: "center", block: "nearest", behavior: DogSCMotion.reduces() ? "auto" : "smooth" });
+    });
+  });
+  const wheel = document.querySelector("#mockup-wheel");
+  if (wheel) {
+    const active = wheel.querySelector(".mockup-card.active");
+    if (active) active.scrollIntoView({ inline: "center", block: "nearest", behavior: "instant" in window ? "instant" : "auto" });
+  }
+  ensureWallpapers();
   document.querySelectorAll("[data-opening]").forEach((node) => node.onclick = () => meta({ opening: { ...state.project.opening, preset: node.dataset.opening, enabled: true } }));
   document.querySelectorAll("[data-cursor]").forEach((node) => node.onclick = () => meta({ cursor: { ...state.project.cursor, asset: node.dataset.cursor } }));
   document.querySelectorAll("[data-motion-mode]").forEach((node) => node.onclick = () => { state.motionMode = node.dataset.motionMode; render(); });
@@ -1435,8 +1490,23 @@ async function openProject(id) {
   state.selectedZoom = state.project.zooms[0]?.id || null;
   state.selectedMotion = null;
   state.selectedMosaic = null;
+  state.selectedMarker = null;
   state.tab = "frame";
-  render();
+  render({ transition: true });
+}
+
+async function ensureWallpapers() {
+  if (Array.isArray(state.wallpapers)) return;
+  try {
+    const payload = await api("/api/wallpapers");
+    state.wallpapers = payload.items || [];
+    if (state.view === "editor" && state.tab === "frame" && (state.bgTab === "wallpaper" || state.bgTab === "custom")) {
+      const host = document.querySelector(".system-wallpapers");
+      if (!host && state.wallpapers.length) render();
+    }
+  } catch (_) {
+    state.wallpapers = [];
+  }
 }
 
 async function loadSources() {
@@ -1589,6 +1659,9 @@ function paintCanvas() {
 function backgroundCss(canvas) {
   if (canvas.background_kind === "pattern") return patternPreview(canvas.pattern || "obsidianGrid");
   if (canvas.background_kind === "dynamic") return dynamicPreview(canvas.dynamic || "auroraFluid");
+  if (canvas.background_kind === "image" && canvas.background_image) {
+    return `center / cover no-repeat url("${canvas.background_image}"), ${canvas.background || "#16161a"}`;
+  }
   return canvas.background || "#16161a";
 }
 
@@ -2103,8 +2176,30 @@ function drawTimeline() {
     const row = rows.find((item) => item.id === marker.clip_id);
     if (!row) return;
     const tick = document.createElement("div");
-    tick.className = "marker";
+    tick.className = `marker${state.selectedMarker === marker.id ? " selected" : ""}`;
     tick.style.left = `${((row.start + Number(marker.local)) / duration) * 100}%`;
+    tick.title = marker.label || (state.lang === "zh" ? "标记" : "Marker");
+    tick.onpointerdown = (event) => {
+      event.stopPropagation();
+      state.selectedMarker = marker.id;
+      state.time = row.start + Number(marker.local || 0);
+      state.playing = false;
+      updatePlayButton();
+      paintCanvas();
+      drawTimeline();
+    };
+    tick.ondblclick = async (event) => {
+      event.stopPropagation();
+      const label = prompt(state.lang === "zh" ? "标记名称" : "Marker label", marker.label || "");
+      if (label == null) return;
+      try {
+        state.project = await api(`/api/projects/${state.project.id}/marker-update`, {
+          method: "POST",
+          body: { id: marker.id, label },
+        });
+        render();
+      } catch (error) { toast(error.message); }
+    };
     clipLane.lane.append(tick);
   });
   const seek = (event, lane, exact = false) => {
@@ -2290,6 +2385,12 @@ window.addEventListener("keydown", (event) => {
     state.time = Math.max(state.time - 0.1, 0);
     paintCanvas();
   }
+  if ((event.key === "Delete" || event.key === "Backspace") && state.view === "editor" && state.selectedMarker) {
+    event.preventDefault();
+    api(`/api/projects/${state.project.id}/marker-delete`, { method: "POST", body: { id: state.selectedMarker } })
+      .then((project) => { state.project = project; state.selectedMarker = null; render(); })
+      .catch((error) => toast(error.message));
+  }
 });
 
 async function boot() {
@@ -2297,6 +2398,7 @@ async function boot() {
     state.env = await api("/api/environment");
     state.projects = await api("/api/projects");
     await loadSources();
+    ensureWallpapers();
   } catch (error) {
     toast(error.message);
   }

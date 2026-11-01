@@ -17,20 +17,21 @@
 
 | ID | Gap | 更好 Linux 路径 | Web 现状 |
 |---|---|---|---|
-| G09 | Inspector matchedGeometry spring | Qt Spring / JS spring | CSS 拇指 + `slideThumb` |
+| G09 | Inspector matchedGeometry spring | Qt Spring / JS spring | **已落地** `DogSCMotion.settle` 积分拇指 |
 | G10 | 按压缩放 0.92/0.96 | 同 token | **已对齐** |
 | G11 | 岛阴影 r1.5/18/44 | 同 token | **已对齐 box-shadow** |
 | G13 | Stage dots 24 / 1.2 / α0.11 | 同 token | **已对齐** |
 | G14 | Inspector 宽 384（340–480） | 可拖拽分栏 | **已落地** 拖拽 340–480 |
 | G15 | Timeline 高可拖 | 拖拽手柄 | **已落地** 180–420 |
-| G16 | Mockup 转盘 | WebGL/canvas 或 Qt PathView | 列表 choice-card（可接受最优解） |
-| G17 | 系统壁纸目录 | `~/.local/share/backgrounds` + portal | CSS 预设（门户最优解另议） |
+| G16 | Mockup 转盘 | WebGL/canvas 或 Qt PathView | **已落地** 横向 snap 转盘 + 剪影 |
+| G17 | 系统壁纸目录 | `~/.local/share/backgrounds` + portal | **已落地** `/api/wallpapers` 扫描 |
 | G18 | 真波形 | ffmpeg peaks | **已落地** `/peaks` + canvas |
 | G19 | 时间对齐胶片 | thumb-by-time | **已落地** `/thumb?t=` |
 | G20 | 磁吸到 clip/overlay 边 | 同 Apple targets | **已落地** scrub + **trim** + snap guide |
 | G21 | Export Sheet | export_plan 估大小 | **已落地** 估大小 / 进度 / 选项 sheet |
 | G22 | Full / Fast 预览 | 原生档位 | **已落地** 菜单接线（Fast 降滤镜 + 放宽松 seek） |
-| G23 | 页面 handoff 动效 | View Transition / Qt stack | softEnter + 局部更新 |
+| G23 | 页面 handoff 动效 | View Transition / Qt stack | **已落地** `startViewTransition` + softEnter |
+| G26 | 恢复已删剪辑 / 标记 | 原生 undo bag | **已落地** `deleted_clips` + marker 改名/删除 |
 | G24 | 实况摄像头 PiP | getUserMedia / Qt Multimedia | **已接线** getUserMedia（无设备时占位） |
 | G25 | focus-dot / mosaic / sticker 舞台 | Metal overlay | **已落地** stage overlays |
 
@@ -43,4 +44,4 @@
 | Ubuntu Wayland 采集 | **xdg-desktop-portal + PipeWire**（已有）/ GTK4+GStreamer | 门户契合度最高 |
 | 指针轨迹 | **libinput** / portal remote desktop | 浏览器拿不到 CGEvent 级流 |
 
-**结论：** Web Soft Silver 已收齐可复刻的 P1 UX（G07/G14/G15/G18–G22/G24/G25）。P0 预览真相源 / continuous 圆角 / 浮动录制窗的**最优解**仍是 **Qt6-QML-Vulkan**（`linux/native/qt6`），Web 桥作为过渡 chrome 保留。
+**结论：** Web Soft Silver 已收齐可复刻 P1（含 G09/G16/G17/G23/G26）。P0 预览真相源 / continuous 圆角 / 浮动录制窗的**最优解**仍是 **Qt6-QML-Vulkan**（`linux/native/qt6`）；Web 用 `corner-shape: squircle` 作过渡近似。
