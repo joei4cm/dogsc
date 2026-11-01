@@ -20,7 +20,7 @@
 | G09 | Inspector matchedGeometry spring | Qt Spring / JS spring | **已落地** `DogSCMotion.settle` 积分拇指 |
 | G10 | 按压缩放 0.92/0.96 | 同 token | **已对齐** |
 | G11 | 岛阴影 r1.5/18/44 | 同 token | **已对齐 box-shadow** |
-| G13 | Stage dots 18 / r0.8 / α0.13 | 同 token | **已对齐** EditorStageDots |
+| G13 | Stage dots 24 / 1.2 / α0.11 + mask | EditorWorkspaceGrid | **已对齐**（误用 StageDots 已纠正） |
 | G14 | Inspector 宽 384（340–480） | 可拖拽分栏 | **已落地** 拖拽 340–480 |
 | G15 | Timeline 高可拖 | 拖拽手柄 | **已落地** 180–420 |
 | G16 | Mockup 转盘 | WebGL/canvas 或 Qt PathView | **已落地** 横向 snap 转盘 + 剪影 |

@@ -45,18 +45,18 @@ ApplicationWindow {
             anchors.top: parent.top
             anchors.bottom: timeline.top
 
-            // Stage dots — Apple EditorStageDots: spacing 18, r0.8, α0.13
+            // Stage dots — Apple EditorWorkspaceGrid: stride 24, r0.6, α0.11
             Canvas {
                 id: stageDots
                 anchors.fill: parent
                 onPaint: {
                     const ctx = getContext("2d")
                     ctx.clearRect(0, 0, width, height)
-                    ctx.fillStyle = "rgba(0,0,0,0.13)"
-                    for (let x = 9; x < width; x += 18)
-                        for (let y = 9; y < height; y += 18) {
+                    ctx.fillStyle = "rgba(0,0,0,0.11)"
+                    for (let x = 12; x < width; x += 24)
+                        for (let y = 12; y < height; y += 24) {
                             ctx.beginPath()
-                            ctx.arc(x, y, 0.8, 0, Math.PI * 2)
+                            ctx.arc(x, y, 0.6, 0, Math.PI * 2)
                             ctx.fill()
                         }
                 }
@@ -84,7 +84,7 @@ ApplicationWindow {
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.verticalCenterOffset: root.cropping ? -18 : -8
-                radius: 14
+                radius: 10
                 color: "#111111"
                 border.color: Qt.rgba(1, 1, 1, 0.06)
                 border.width: 0.5

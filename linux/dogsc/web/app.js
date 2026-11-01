@@ -224,7 +224,7 @@ const STR = {
   zh: {
     lang: "English",
     title: "录得清楚，剪得轻松。",
-    lead: "DogSC 的 Linux 版，面向 Ubuntu 与 Omarchy。录显示器、窗口或区域，再在时间线上分割、裁剪，并用运镜、样机框和背景完成成片。",
+    lead: "录显示器、窗口或区域，再在 Soft Silver 时间线上剪辑与运镜。",
     record: "开始录制",
     demo: "打开示例",
     import: "导入视频",
@@ -311,7 +311,7 @@ const STR = {
   en: {
     lang: "中文",
     title: "Record clearly. Cut lightly.",
-    lead: "DogSC for Ubuntu and Omarchy. Capture a display, window, or region, then edit with zooms, frames, and backgrounds.",
+    lead: "Capture a display, window, or region — then cut and zoom on Soft Silver.",
     record: "Record",
     demo: "Open example",
     import: "Import video",
