@@ -29,6 +29,7 @@ ApplicationWindow {
     property real inspectorWidth: 384
     property bool cropping: false
     property bool exportOpen: false
+    property bool recording: false
     property int inspectorTab: 0
     property int timelineLane: 0
 
@@ -543,7 +544,7 @@ ApplicationWindow {
                 }
             }
 
-            // Playhead stub
+            // Playhead + hover preview ghost + magnetic snap guide (G02 / G20 stubs)
             Rectangle {
                 anchors.top: timelineBar.bottom
                 anchors.bottom: parent.bottom
@@ -551,17 +552,36 @@ ApplicationWindow {
                 width: 2
                 color: "#ff453b"
                 opacity: 0.9
+                z: 3
+            }
+            Rectangle {
+                anchors.top: timelineBar.bottom
+                anchors.bottom: parent.bottom
+                x: parent.width * 0.41
+                width: 1
+                color: Qt.rgba(0.1, 0.12, 0.18, 0.35)
+                opacity: 0.8
+                z: 2
+            }
+            Rectangle {
+                anchors.top: timelineBar.bottom
+                anchors.bottom: parent.bottom
+                x: parent.width * 0.55
+                width: 1
+                color: "#f2ad47"
+                opacity: 0.7
+                z: 2
             }
         }
 
-        // Floating Soft Silver recorder capsule
+        // Floating Soft Silver recorder capsule — idle↔live morph (G03 stub)
         Rectangle {
             id: capsule
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.bottom: timeline.top
             anchors.bottomMargin: 14
             height: 56
-            width: modeLabel.implicitWidth + 220
+            width: root.recording ? 168 : (modeLabel.implicitWidth + 220)
             radius: 28
             color: root.panel
             border.color: root.line
@@ -589,6 +609,7 @@ ApplicationWindow {
 
                 Rectangle {
                     id: modeWheel
+                    visible: !root.recording
                     Layout.preferredHeight: 40
                     Layout.preferredWidth: modeLabel.implicitWidth + 36
                     radius: 20
@@ -607,15 +628,31 @@ ApplicationWindow {
                     }
                 }
 
+                Text {
+                    visible: root.recording
+                    text: "00:12.40"
+                    color: root.platinum
+                    font.pixelSize: 14
+                    font.weight: Font.DemiBold
+                    font.family: "ui-monospace"
+                    leftPadding: 8
+                }
+
                 Item { Layout.fillWidth: true }
 
                 Rectangle {
                     width: 36; height: 36; radius: 18
                     color: "#ff453b"
                     Rectangle {
-                        width: 12; height: 12; radius: 6
+                        width: root.recording ? 12 : 12
+                        height: root.recording ? 12 : 12
+                        radius: root.recording ? 3 : 6
                         anchors.centerIn: parent
                         color: "white"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: root.recording = !root.recording
                     }
                 }
             }

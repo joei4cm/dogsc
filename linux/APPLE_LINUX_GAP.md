@@ -7,8 +7,8 @@
 | ID | Gap | Apple | Linux 现状 | 更好的 Linux 实现 | Web 现在？ |
 |---|---|---|---|---|---|
 | G01 | GPU 预览 | CIImage→CAMetalLayer，CADisplayLink | `<video>` + CSS transform | **Qt6 QQuickItem + Vulkan RHI**（或 Tauri+wgpu） | 否 → Qt6 |
-| G02 | 零容差 scrub | AVPlayer tolerance=0 | HTMLVideo seek coalesce + Full 精确 settle | 原生解码纹理 | 部分 |
-| G03 | 浮动录制岛 | 独立 NSPanel + morph spring 0.5/0.82 | 页内 `.recorder-capsule` | Qt 无边框窗 / Wayland layer-shell | 部分 |
+| G02 | 零容差 scrub | AVPlayer tolerance=0 | **加强**：Full ε≈0 settle + hover 幽灵头；Fast 粗 scrub | 原生解码纹理 | 部分 |
+| G03 | 浮动录制岛 | 独立 NSPanel + morph spring 0.5/0.82 | **加强**：idle↔live morph；Qt 无边框窗仍为最优 | Qt / Wayland layer-shell | 部分 |
 | G04 | Continuous 圆角 | `cornerCurve = .continuous` | CSS 圆形 radius | Qt SDF squircle / Skia | 否 → Qt6 |
 | G06 | 指针流 | CGEvent | 仅 X11 PointerSampler | **libinput** / portal RD / 合成器 API | 否 |
 | G07 | Crop 草稿态 | 确认/取消/清除 + 八控点 | **已落地**：草稿 overlay、检查器、Esc 取消、导出 `canvas.crop` | GPU 预览仍依赖 G01 | **是** |
@@ -33,7 +33,8 @@
 | G23 | 页面 handoff 动效 | View Transition / Qt stack | **已落地** `startViewTransition` + softEnter |
 | G26 | 恢复已删剪辑 / 标记 | 原生 undo bag | **已落地** `deleted_clips` + marker 改名/删除 |
 | G24 | 实况摄像头 PiP | getUserMedia / Qt Multimedia | **已接线** getUserMedia（无设备时占位） |
-| G25 | focus-dot / mosaic / sticker 舞台 | Metal overlay | **已落地** stage overlays |
+| G25 | focus-dot / mosaic / sticker 舞台 | Metal overlay | **已落地** overlays + **拖拽** / PiP 拖拽 |
+| G27 | 快捷键 ⌘E / fit-all / reduce-motion | AppKit menu | **已落地** |
 
 ## P2+ 与原生毕业路径
 

@@ -38,6 +38,7 @@ const state = {
   timelineMode: "picture",
   magnetic: true,
   hoverPreview: true,
+  hoverTime: null,
   timelineZoom: 1,
   dirty: false,
 };
@@ -319,6 +320,7 @@ function shortcutHint(action) {
     play: "Space",
     split: "S",
     back: "Esc",
+    export: `${mod}+E`,
   };
   return map[action] || "";
 }
@@ -500,7 +502,7 @@ function recorderCapsuleHtml() {
   const live = state.recording.active;
   if (live) {
     return `<div class="recorder-dock">
-      <div class="recorder-capsule">
+      <div class="recorder-capsule is-live" data-mode="live">
         <div class="recording-timer" id="elapsed">${formatTime(state.recording.elapsed)}</div>
         <button class="rec-toggle" id="add-marker" title="${t("marker")}">${ICONS.marker}</button>
         <button class="record-go live" id="stop-record" title="${t("stop")}"><span class="dot"><i></i></span></button>
@@ -558,7 +560,7 @@ function recorderCapsuleHtml() {
   }
   return `<div class="recorder-dock">
     ${popover}
-    <div class="recorder-capsule" id="recorder-capsule">
+    <div class="recorder-capsule" id="recorder-capsule" data-mode="idle">
       <button class="mode-wheel" id="mode-wheel" title="${sourceLabel(source)}">
         ${ICONS[source] || ICONS.display}<span>${sourceLabel(source)}</span><span class="chev">⇅</span>
       </button>
@@ -644,10 +646,12 @@ function stageHudHtml(project) {
   const shortcutsPanel = state.hudMenu === "shortcuts" ? `<aside class="shortcuts-panel island" id="shortcuts-panel" role="dialog" aria-label="${state.lang === "zh" ? "快捷键" : "Shortcuts"}">
     <div class="section-title">${state.lang === "zh" ? "快捷键" : "Shortcuts"}</div>
     <div class="shortcut-row"><span>${state.lang === "zh" ? "播放 / 暂停" : "Play / Pause"}</span><kbd>${shortcutHint("play")}</kbd></div>
+    <div class="shortcut-row"><span>${t("export")}</span><kbd>${shortcutHint("export")}</kbd></div>
     <div class="shortcut-row"><span>${t("undo")}</span><kbd>${shortcutHint("undo")}</kbd></div>
     <div class="shortcut-row"><span>${t("redo")}</span><kbd>${shortcutHint("redo")}</kbd></div>
     <div class="shortcut-row"><span>${t("split")}</span><kbd>${shortcutHint("split")}</kbd></div>
     <div class="shortcut-row"><span>${state.lang === "zh" ? "上一帧 / 下一帧" : "Step frames"}</span><kbd>← →</kbd></div>
+    <div class="shortcut-row"><span>${state.lang === "zh" ? "删除选中" : "Delete"}</span><kbd>Delete</kbd></div>
     <div class="shortcut-row"><span>${state.lang === "zh" ? "关闭浮层" : "Dismiss"}</span><kbd>${shortcutHint("back")}</kbd></div>
   </aside>` : "";
   const cropControls = state.cropping ? `
@@ -1302,7 +1306,13 @@ function bind() {
   });
   document.querySelector("#magnetic")?.addEventListener("click", () => { state.magnetic = !state.magnetic; render(); });
   document.querySelector("#hover-preview")?.addEventListener("click", () => { state.hoverPreview = !state.hoverPreview; render(); });
-  document.querySelector("#fit-all")?.addEventListener("click", () => { state.timelineZoom = 1; render(); });
+  document.querySelector("#fit-all")?.addEventListener("click", () => {
+    const lanes = document.querySelector("#lanes");
+    const duration = Math.max(Z.duration(state.project.clips), 0.1);
+    const usable = Math.max((lanes?.clientWidth || 640) - 100, 160);
+    state.timelineZoom = Z.clamp(usable / (duration * 120), 0.35, 6);
+    render();
+  });
   document.querySelector("#timeline-zoom")?.addEventListener("input", (event) => {
     state.timelineZoom = Number(event.target.value);
     drawTimeline();
@@ -1466,6 +1476,8 @@ async function updateMosaic(body) {
 
 async function mutate(path, body) {
   try {
+    const selectedMosaicId = state.selectedMosaic?.id;
+    const selectedStickerId = state.selectedSticker?.id;
     state.project = await api(path, { method: "POST", body });
     if (path.endsWith("/zoom") && state.project.zooms.length) state.selectedZoom = state.project.zooms.at(-1).id;
     if (path.endsWith("/screen-motion") && state.project.screen_motions.length) {
@@ -1476,6 +1488,12 @@ async function mutate(path, body) {
     if (path.endsWith("/mosaic") && state.project.mosaics.length) {
       state.selectedMosaic = state.project.mosaics.at(-1);
       state.tab = "motion";
+    }
+    if (path.endsWith("/mosaic-update") && selectedMosaicId) {
+      state.selectedMosaic = (state.project.mosaics || []).find((item) => item.id === selectedMosaicId) || null;
+    }
+    if (path.endsWith("/sticker-update") && selectedStickerId) {
+      state.selectedSticker = (state.project.stickers || []).find((item) => item.id === selectedStickerId) || null;
     }
     render();
   } catch (error) { toast(error.message); }
@@ -1566,6 +1584,7 @@ function mountPreview() {
     updateZoom({ focus_x: Z.clamp(focusX, 0, 1), focus_y: Z.clamp(focusY, 0, 1) });
   };
   bindCropOverlay();
+  bindStageDragDelegation();
   ensureCameraPip();
 }
 
@@ -1652,7 +1671,9 @@ function paintCanvas() {
     }
   }
   const located = Z.locateTimeline(project.clips, state.time);
-  if (located && !state.playing) DogSCPreview.seekCoalesced(located.source, state.previewQuality === "full");
+  if (located && !state.playing && state.hoverTime == null) {
+    DogSCPreview.seekCoalesced(located.source, state.previewQuality === "full", state.previewQuality);
+  }
   syncTransport();
 }
 
@@ -1724,13 +1745,116 @@ function paintStageOverlays() {
     if (state.time < item.start || state.time > item.end) continue;
     const intensity = Number(item.intensity || 0.55);
     const blur = 4 + intensity * 18;
-    parts.push(`<div class="overlay-mosaic ${item.id === state.selectedMosaic?.id ? "selected" : ""}" style="left:${item.x * 100}%;top:${item.y * 100}%;width:${item.width * 100}%;height:${item.height * 100}%;border-radius:${(item.corner_radius || 0.08) * 40}px;backdrop-filter:blur(${blur}px);background:rgba(20,22,28,${0.12 + intensity * 0.25})"></div>`);
+    parts.push(`<div class="overlay-mosaic ${item.id === state.selectedMosaic?.id ? "selected" : ""}" data-overlay="mosaic" data-id="${item.id}" style="left:${item.x * 100}%;top:${item.y * 100}%;width:${item.width * 100}%;height:${item.height * 100}%;border-radius:${(item.corner_radius || 0.08) * 40}px;backdrop-filter:blur(${blur}px);background:rgba(20,22,28,${0.12 + intensity * 0.25)}"></div>`);
   }
   for (const item of (state.project.stickers || []).map(absoluteItem)) {
     if (state.time < item.start || state.time > item.end) continue;
-    parts.push(`<img class="overlay-sticker" src="/api/projects/${state.project.id}/${escapeHtml(item.path)}" alt="" style="left:${item.x * 100}%;top:${item.y * 100}%;width:${item.width * 100}%;opacity:${item.opacity ?? 1};transform:translate(-50%,-50%) rotate(${item.rotation || 0}deg);border-radius:${item.corner_radius || 18}px">`);
+    const selected = item.id === state.selectedSticker?.id;
+    parts.push(`<div class="overlay-sticker ${selected ? "selected" : ""}" data-overlay="sticker" data-id="${item.id}" style="left:${item.x * 100}%;top:${item.y * 100}%;width:${item.width * 100}%;opacity:${item.opacity ?? 1};transform:translate(-50%,-50%) rotate(${item.rotation || 0}deg);border-radius:${item.corner_radius || 18}px"><img src="/api/projects/${state.project.id}/${escapeHtml(item.path)}" alt="" draggable="false"></div>`);
   }
   host.innerHTML = parts.join("");
+}
+
+function bindStageDragDelegation() {
+  const camera = document.querySelector("#camera");
+  const host = document.querySelector("#overlays");
+  const pip = document.querySelector("#pip");
+  if (!camera || !host) return;
+  host.onpointerdown = (event) => {
+    const node = event.target.closest("[data-overlay]");
+    if (!node || state.cropping || state.playing) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const kind = node.dataset.overlay;
+    const id = node.dataset.id;
+    if (kind === "mosaic") {
+      state.selectedMosaic = (state.project.mosaics || []).find((item) => item.id === id) || null;
+      state.selectedSticker = null;
+      state.tab = "motion";
+    } else {
+      state.selectedSticker = (state.project.stickers || []).find((item) => item.id === id) || null;
+      state.selectedMosaic = null;
+    }
+    const box = camera.getBoundingClientRect();
+    const originX = kind === "mosaic" ? Number(state.selectedMosaic?.x || 0) : Number(state.selectedSticker?.x || 0);
+    const originY = kind === "mosaic" ? Number(state.selectedMosaic?.y || 0) : Number(state.selectedSticker?.y || 0);
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const move = (next) => {
+      const dx = (next.clientX - startX) / Math.max(box.width, 1);
+      const dy = (next.clientY - startY) / Math.max(box.height, 1);
+      if (kind === "mosaic" && state.selectedMosaic) {
+        const width = Number(state.selectedMosaic.width || 0.3);
+        const height = Number(state.selectedMosaic.height || 0.25);
+        state.selectedMosaic = {
+          ...state.selectedMosaic,
+          x: Z.clamp(originX + dx, 0, 1 - width),
+          y: Z.clamp(originY + dy, 0, 1 - height),
+        };
+        node.style.left = `${state.selectedMosaic.x * 100}%`;
+        node.style.top = `${state.selectedMosaic.y * 100}%`;
+      } else if (kind === "sticker" && state.selectedSticker) {
+        state.selectedSticker = {
+          ...state.selectedSticker,
+          x: Z.clamp(originX + dx, 0.05, 0.95),
+          y: Z.clamp(originY + dy, 0.05, 0.95),
+        };
+        node.style.left = `${state.selectedSticker.x * 100}%`;
+        node.style.top = `${state.selectedSticker.y * 100}%`;
+      }
+    };
+    const up = async () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      try {
+        if (kind === "mosaic" && state.selectedMosaic) {
+          await mutate(`/api/projects/${state.project.id}/mosaic-update`, {
+            id: state.selectedMosaic.id,
+            x: state.selectedMosaic.x,
+            y: state.selectedMosaic.y,
+          });
+        } else if (kind === "sticker" && state.selectedSticker) {
+          await mutate(`/api/projects/${state.project.id}/sticker-update`, {
+            id: state.selectedSticker.id,
+            x: state.selectedSticker.x,
+            y: state.selectedSticker.y,
+          });
+        }
+      } catch (error) { toast(error.message); }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  if (!pip) return;
+  pip.onpointerdown = (event) => {
+    if (state.cropping || !state.project.camera?.enabled) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const box = camera.getBoundingClientRect();
+    const cam = state.project.camera || {};
+    const originX = Number(cam.x || 0.82);
+    const originY = Number(cam.y || 0.78);
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const move = (next) => {
+      const dx = (next.clientX - startX) / Math.max(box.width, 1);
+      const dy = (next.clientY - startY) / Math.max(box.height, 1);
+      const x = Z.clamp(originX + dx, 0.08, 0.92);
+      const y = Z.clamp(originY + dy, 0.08, 0.92);
+      const size = Number(cam.size || 0.22) * 100;
+      pip.style.left = `${x * 100 - size / 2}%`;
+      pip.style.top = `${y * 100 - size / 2}%`;
+      pip.dataset.x = String(x);
+      pip.dataset.y = String(y);
+    };
+    const up = async () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      await meta({ camera: { ...state.project.camera, x: Number(pip.dataset.x || originX), y: Number(pip.dataset.y || originY) } });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
 }
 
 function syncCropOverlay() {
@@ -2222,15 +2346,17 @@ function drawTimeline() {
       guide.remove();
     }
     const located = Z.locateTimeline(state.project.clips, state.time);
-    if (located) DogSCPreview.seekCoalesced(located.source, exact);
+    if (located) DogSCPreview.seekCoalesced(located.source, exact, state.previewQuality);
     paintCanvas();
   };
   clipLane.lane.onpointerdown = (event) => {
-    if (event.target.closest(".handle, .zoom, .motion, .mosaic, .sticker-clip, .lane-empty")) return;
+    if (event.target.closest(".handle, .zoom, .motion, .mosaic, .sticker-clip, .lane-empty, .marker")) return;
     seek(event, clipLane.lane, false);
     const move = (next) => seek(next, clipLane.lane, false);
     const up = () => {
-      DogSCPreview.settle();
+      DogSCPreview.settle(state.previewQuality);
+      const located = Z.locateTimeline(state.project.clips, state.time);
+      if (located) DogSCPreview.seekCoalesced(located.source, true, state.previewQuality);
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
     };
@@ -2242,11 +2368,23 @@ function drawTimeline() {
       if (event.buttons) return;
       const rect = clipLane.lane.getBoundingClientRect();
       const preview = Z.clamp((event.clientX - rect.left) / rect.width, 0, 1) * duration;
+      state.hoverTime = preview;
+      let ghost = lanes.querySelector(".hover-playhead");
+      if (!ghost) {
+        ghost = document.createElement("div");
+        ghost.className = "hover-playhead";
+        lanes.append(ghost);
+      }
+      ghost.style.left = `calc(76px + ${(preview / duration) * width}px)`;
       const located = Z.locateTimeline(state.project.clips, preview);
-      if (located) DogSCPreview.seekCoalesced(located.source, false);
+      if (located) DogSCPreview.seekCoalesced(located.source, false, state.previewQuality);
     };
     clipLane.lane.onpointerleave = () => {
-      DogSCPreview.settle();
+      state.hoverTime = null;
+      lanes.querySelector(".hover-playhead")?.remove();
+      DogSCPreview.settle(state.previewQuality);
+      const located = Z.locateTimeline(state.project.clips, state.time);
+      if (located) DogSCPreview.seekCoalesced(located.source, true, state.previewQuality);
       paintCanvas();
     };
   }
@@ -2372,6 +2510,10 @@ window.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z" && state.view === "editor") {
     event.preventDefault();
     mutate(`/api/projects/${state.project.id}/${event.shiftKey ? "redo" : "undo"}`, {});
+  }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "e" && state.view === "editor") {
+    event.preventDefault();
+    if (!state.cropping) openExportSheet();
   }
   if (event.key === "ArrowRight" && state.view === "editor") {
     state.playing = false;
