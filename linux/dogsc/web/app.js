@@ -40,8 +40,115 @@ const state = {
   hoverPreview: true,
   hoverTime: null,
   timelineZoom: 1,
+  trackMenu: false,
+  trackVisibility: (() => {
+    try {
+      return {
+        zoom: true,
+        motion: true,
+        mosaic: true,
+        sticker: true,
+        ...JSON.parse(localStorage.getItem("dogsc-tracks") || "{}"),
+      };
+    } catch (_) {
+      return { zoom: true, motion: true, mosaic: true, sticker: true };
+    }
+  })(),
+  altHeld: false,
   dirty: false,
 };
+
+/** Apple EditorTimelineMagneticSnap: capture ~7px, escape ~14px, suppress start edges. */
+const magneticSession = {
+  candidates: null,
+  suppressed: new Set(),
+  held: null,
+  heldOffset: 0,
+  reset() {
+    this.candidates = null;
+    this.suppressed = new Set();
+    this.held = null;
+    this.heldOffset = 0;
+  },
+};
+
+function magneticResolve(proposed, { width, duration, targets, initial = [], offsets = [0], shift = false }) {
+  if (!state.magnetic || !Number.isFinite(proposed) || width <= 0) {
+    state.snapGuide = null;
+    return proposed;
+  }
+  const pps = width / Math.max(duration, 0.001);
+  const capture = 7 / pps;
+  const escape = 14 / pps;
+  if (!magneticSession.candidates) {
+    magneticSession.candidates = [...new Set(targets().filter(Number.isFinite))].sort((a, b) => a - b);
+    magneticSession.suppressed = new Set(
+      magneticSession.candidates.filter((point) => initial.some((edge) => Math.abs(edge - point) < 1e-5))
+    );
+  }
+  magneticSession.suppressed = new Set(
+    [...magneticSession.suppressed].filter((point) =>
+      offsets.some((offset) => Math.abs(proposed + offset - point) <= escape)
+    )
+  );
+  if (shift) {
+    magneticSession.held = null;
+    magneticSession.heldOffset = 0;
+    state.snapGuide = null;
+    return proposed;
+  }
+  if (magneticSession.held != null && Math.abs(proposed + magneticSession.heldOffset - magneticSession.held) <= escape) {
+    state.snapGuide = magneticSession.held;
+    return magneticSession.held - magneticSession.heldOffset;
+  }
+  magneticSession.held = null;
+  magneticSession.heldOffset = 0;
+  let best = null;
+  const points = magneticSession.candidates || [];
+  for (const offset of offsets) {
+    const position = proposed + offset;
+    for (const point of points) {
+      const distance = Math.abs(point - position);
+      if (magneticSession.suppressed.has(point) || distance > capture) continue;
+      if (!best || distance < best.distance) best = { distance, time: point, offset };
+    }
+  }
+  if (!best) {
+    state.snapGuide = null;
+    return proposed;
+  }
+  magneticSession.heldOffset = best.offset;
+  magneticSession.held = best.time;
+  state.snapGuide = best.time;
+  return best.time - best.offset;
+}
+
+function persistTracks() {
+  localStorage.setItem("dogsc-tracks", JSON.stringify(state.trackVisibility));
+}
+
+function formatHoverBadge(seconds) {
+  const total = Math.max(0, Number(seconds) || 0);
+  const minutes = Math.floor(total / 60);
+  const rem = total - minutes * 60;
+  const whole = Math.floor(rem);
+  const cents = Math.floor((rem - whole) * 100);
+  return `${minutes}:${String(whole).padStart(2, "0")}.${String(cents).padStart(2, "0")}`;
+}
+
+function placeHoverGuide(lanes, duration, width, time) {
+  let ghost = lanes.querySelector(".hover-playhead");
+  if (!ghost) {
+    ghost = document.createElement("div");
+    ghost.className = "hover-playhead";
+    ghost.innerHTML = `<span class="hover-badge">${formatHoverBadge(time)}</span>`;
+    lanes.append(ghost);
+  }
+  ghost.style.left = `calc(76px + ${(time / duration) * width}px)`;
+  const badge = ghost.querySelector(".hover-badge");
+  if (badge) badge.textContent = formatHoverBadge(time);
+  return ghost;
+}
 
 function blankCrop() {
   return { x: 0, y: 0, width: 1, height: 1 };
@@ -97,6 +204,7 @@ const ICONS = {
   magnet: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M4.5 3.5h3v6a1.5 1.5 0 0 0 3 0v-6h3v6a4.5 4.5 0 0 1-9 0z"/></svg>`,
   eye: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M2.5 9s2.8-4.5 6.5-4.5S15.5 9 15.5 9s-2.8 4.5-6.5 4.5S2.5 9 2.5 9z"/><circle cx="9" cy="9" r="2"/></svg>`,
   fit: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M3.5 6.5V3.5H6.5M11.5 3.5h3v3M14.5 11.5v3h-3M6.5 14.5h-3v-3"/></svg>`,
+  tracks: `<svg class="icon-svg sm" viewBox="0 0 18 18"><rect x="2.5" y="3.5" width="13" height="3" rx="1"/><rect x="2.5" y="7.5" width="13" height="3" rx="1"/><rect x="2.5" y="11.5" width="13" height="3" rx="1"/></svg>`,
   play: `<svg class="icon-svg sm fill" viewBox="0 0 18 18"><path d="M6.2 4.2l8 4.8-8 4.8z"/></svg>`,
   pause: `<svg class="icon-svg sm fill" viewBox="0 0 18 18"><rect x="5" y="4" width="2.8" height="10" rx="0.6"/><rect x="10.2" y="4" width="2.8" height="10" rx="0.6"/></svg>`,
   prev: `<svg class="icon-svg sm" viewBox="0 0 18 18"><path d="M11.2 4.8L7 9l4.2 4.2"/><path d="M5.2 4.5v9"/></svg>`,
@@ -190,6 +298,11 @@ const STR = {
     hoverPrev: "悬浮预览",
     fitAll: "全部显示",
     restoreCuts: "恢复剪辑",
+    tracks: "轨道",
+    trackZoom: "运镜",
+    trackMotion: "屏幕 3D",
+    trackMosaic: "马赛克",
+    trackSticker: "贴图",
     autoMotion: "自动运镜",
     manualMotion: "手动操控",
     pan2d: "平移 2D",
@@ -272,6 +385,11 @@ const STR = {
     hoverPrev: "Hover preview",
     fitAll: "Fit all",
     restoreCuts: "Restore cuts",
+    tracks: "Tracks",
+    trackZoom: "Zoom",
+    trackMotion: "Screen 3D",
+    trackMosaic: "Mosaic",
+    trackSticker: "Sticker",
     autoMotion: "Auto motion",
     manualMotion: "Manual",
     pan2d: "2D pan",
@@ -349,6 +467,7 @@ function closeFloatingUI() {
   let changed = false;
   if (state.recorderPopover) { state.recorderPopover = null; changed = true; }
   if (state.hudMenu) { state.hudMenu = null; changed = true; }
+  if (state.trackMenu) { state.trackMenu = false; changed = true; }
   if (state.exportSheet && state.exportSheet.state !== "running") {
     state.exportSheet = null;
     changed = true;
@@ -685,6 +804,13 @@ function stageHudHtml(project) {
 }
 
 function timelineBarHtml() {
+  const tracks = state.trackVisibility;
+  const trackMenu = state.trackMenu ? `<div class="track-menu island" id="track-menu" role="menu">
+      <button type="button" data-track="zoom" aria-pressed="${tracks.zoom !== false}"><span>${t("trackZoom")}</span><em>${tracks.zoom !== false ? "●" : "○"}</em></button>
+      <button type="button" data-track="motion" aria-pressed="${tracks.motion !== false}"><span>${t("trackMotion")}</span><em>${tracks.motion !== false ? "●" : "○"}</em></button>
+      <button type="button" data-track="mosaic" aria-pressed="${tracks.mosaic !== false}"><span>${t("trackMosaic")}</span><em>${tracks.mosaic !== false ? "●" : "○"}</em></button>
+      <button type="button" data-track="sticker" aria-pressed="${tracks.sticker !== false}"><span>${t("trackSticker")}</span><em>${tracks.sticker !== false ? "●" : "○"}</em></button>
+    </div>` : "";
   return `<div class="timeline-bar">
     <button class="tl-tool" id="split" title="${t("split")} · ${shortcutHint("split")}">${ICONS.scissors}</button>
     <button class="tl-tool" id="delete-selection" title="${t("delete")} · Delete">${ICONS.trash}</button>
@@ -693,6 +819,10 @@ function timelineBarHtml() {
     <div class="tl-group" style="margin-left:8px">
       <button id="mode-picture" class="${state.timelineMode === "picture" ? "active" : ""}">${ICONS.film}${t("picture")}</button>
       <button id="mode-wave" class="${state.timelineMode === "waveform" ? "active" : ""}">${ICONS.wave}${t("waveform")}</button>
+    </div>
+    <div class="tl-tracks">
+      <button class="tl-tool ${state.trackMenu ? "active" : ""}" id="tracks-btn" title="${t("tracks")}" aria-expanded="${state.trackMenu}">${ICONS.tracks}</button>
+      ${trackMenu}
     </div>
     <div class="spacer"></div>
     <button class="tl-tool ${state.magnetic ? "active" : ""}" id="magnetic" title="${t("magnetic")}" aria-pressed="${state.magnetic}">${ICONS.magnet}</button>
@@ -1304,8 +1434,22 @@ function bind() {
     state.timelineMode = "waveform";
     ensurePeaks().then(() => render()).catch(() => render());
   });
-  document.querySelector("#magnetic")?.addEventListener("click", () => { state.magnetic = !state.magnetic; render(); });
+  document.querySelector("#magnetic")?.addEventListener("click", () => { state.magnetic = !state.magnetic; magneticSession.reset(); render(); });
   document.querySelector("#hover-preview")?.addEventListener("click", () => { state.hoverPreview = !state.hoverPreview; render(); });
+  document.querySelector("#tracks-btn")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    state.trackMenu = !state.trackMenu;
+    render();
+  });
+  document.querySelectorAll("#track-menu [data-track]").forEach((node) => {
+    node.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const key = node.dataset.track;
+      state.trackVisibility[key] = state.trackVisibility[key] === false;
+      persistTracks();
+      render();
+    });
+  });
   document.querySelector("#fit-all")?.addEventListener("click", () => {
     const lanes = document.querySelector("#lanes");
     const duration = Math.max(Z.duration(state.project.clips), 0.1);
@@ -2150,12 +2294,17 @@ function drawTimeline() {
     mark.textContent = formatTime(t).slice(0, 5);
     ruler.append(mark);
   }
+  const locatedClip = Z.locateTimeline(state.project.clips, state.time)?.clip;
   const clipLane = makeLane(state.timelineMode === "waveform" ? "波形" : "画面", rows, (lane, row) => {
     const node = document.createElement("div");
-    node.className = "clip";
+    const selected = locatedClip && locatedClip.id === row.id;
+    node.className = `clip${selected ? " selected" : ""}`;
+    node.dataset.clipId = row.id;
     node.style.left = `${(row.start / duration) * 100}%`;
     node.style.width = `${(row.duration / duration) * 100}%`;
     node.innerHTML = `<span class="handle left"></span><span class="handle right"></span>`;
+    node.onpointerenter = () => node.classList.add("hovered");
+    node.onpointerleave = () => node.classList.remove("hovered");
     if (state.timelineMode === "waveform") {
       node.style.background = "linear-gradient(180deg,#3a3d44,#2a2d33)";
       const canvas = document.createElement("canvas");
@@ -2190,13 +2339,16 @@ function drawTimeline() {
       for (let index = 0; index < cells; index += 1) {
         const image = document.createElement("img");
         const local = srcIn + ((index + 0.5) / cells) * (srcOut - srcIn);
-        image.src = `/api/projects/${state.project.id}/thumb?t=${local.toFixed(3)}`;
         image.alt = "";
         image.loading = "lazy";
+        image.classList.add("film-tile");
+        image.onload = () => image.classList.add("revealed");
         image.onerror = () => {
+          image.onload = () => image.classList.add("revealed");
           image.src = `/api/projects/${state.project.id}/thumbs/${Math.min(index, 7)}.jpg`;
           image.onerror = () => image.remove();
         };
+        image.src = `/api/projects/${state.project.id}/thumb?t=${local.toFixed(3)}`;
         node.append(image);
       }
     }
@@ -2211,6 +2363,8 @@ function drawTimeline() {
     node.style.left = `${(zoom.start / duration) * 100}%`;
     node.style.width = `${Math.max((end - zoom.start) / duration * 100, 1)}%`;
     node.textContent = `${state.lang === "zh" ? "缩放" : "Zoom"} ${Number(zoom.scale).toFixed(1)}x${zoom.auto || state.motionDrive === "auto" ? (state.lang === "zh" ? " · 自动" : " · Auto") : ""}`;
+    node.onpointerenter = () => node.classList.add("hovered");
+    node.onpointerleave = () => node.classList.remove("hovered");
     node.onclick = () => { state.selectedZoom = zoom.id; state.tab = "motion"; state.motionMode = "zoom"; render(); };
     lane.append(node);
   });
@@ -2221,6 +2375,8 @@ function drawTimeline() {
     const end = Number(item.end) + Number(item.exit || 0);
     node.style.left = `${(item.start / duration) * 100}%`;
     node.style.width = `${Math.max((end - item.start) / duration * 100, 1)}%`;
+    node.onpointerenter = () => node.classList.add("hovered");
+    node.onpointerleave = () => node.classList.remove("hovered");
     node.onclick = () => { state.selectedMotion = item.id; state.tab = "motion"; state.motionMode = "tilt"; render(); };
     lane.append(node);
   });
@@ -2236,6 +2392,8 @@ function drawTimeline() {
     node.className = `mosaic${item.id === state.selectedMosaic?.id ? " selected" : ""}`;
     node.style.left = `${(item.start / duration) * 100}%`;
     node.style.width = `${Math.max((item.end - item.start) / duration * 100, 1)}%`;
+    node.onpointerenter = () => node.classList.add("hovered");
+    node.onpointerleave = () => node.classList.remove("hovered");
     node.onclick = () => { state.selectedMosaic = item; state.tab = "motion"; render(); };
     lane.append(node);
   });
@@ -2248,9 +2406,12 @@ function drawTimeline() {
   const stickers = (state.project.stickers || []).map(absoluteItem);
   const stickerLane = makeLane("贴图", stickers, (lane, item) => {
     const node = document.createElement("div");
-    node.className = "sticker-clip";
+    node.className = `sticker-clip${item.id === state.selectedSticker?.id ? " selected" : ""}`;
     node.style.left = `${(item.start / duration) * 100}%`;
     node.style.width = `${Math.max((item.end - item.start) / duration * 100, 1)}%`;
+    node.onpointerenter = () => node.classList.add("hovered");
+    node.onpointerleave = () => node.classList.remove("hovered");
+    node.onclick = () => { state.selectedSticker = item; state.selectedMosaic = null; state.tab = "motion"; render(); };
     lane.append(node);
   });
   if (!stickers.length) {
@@ -2274,35 +2435,33 @@ function drawTimeline() {
     }
     return points.filter((t) => t >= 0 && t <= duration);
   };
-  const magneticTime = (time, laneWidth, showGuide = false) => {
-    if (!state.magnetic) {
-      state.snapGuide = null;
-      return time;
-    }
-    const pps = laneWidth / Math.max(duration, 0.001);
-    const threshold = 8 / pps; // Apple-like ~8px snap radius
-    let best = time;
-    let bestDist = threshold;
-    for (const point of magneticTargets()) {
-      const dist = Math.abs(point - time);
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = point;
-      }
-    }
-    state.snapGuide = bestDist < threshold ? best : null;
-    if (!showGuide) return best;
-    return best;
-  };
+  const magneticTime = (time, laneWidth, event = null) => magneticResolve(time, {
+    width: laneWidth,
+    duration,
+    targets: magneticTargets,
+    initial: [],
+    shift: Boolean(event?.shiftKey),
+  });
   lanes.innerHTML = "";
   lanes.append(ruler);
-  [clipLane, zoomLane, motionLane, mosaicLane, stickerLane].forEach((entry) => lanes.append(entry.wrap));
+  const visibleLanes = [clipLane];
+  if (state.trackVisibility.zoom !== false) visibleLanes.push(zoomLane);
+  if (state.trackVisibility.motion !== false) visibleLanes.push(motionLane);
+  if (state.trackVisibility.mosaic !== false) visibleLanes.push(mosaicLane);
+  if (state.trackVisibility.sticker !== false) visibleLanes.push(stickerLane);
+  visibleLanes.forEach((entry) => lanes.append(entry.wrap));
   // Full-height playhead overlay across ruler + all lanes (Apple NativeTimelinePlayheadView)
   const head = document.createElement("div");
   head.className = "playhead playhead-span";
   head.dataset.laneWidth = String(width);
   head.style.left = `calc(76px + ${(state.time / duration) * width}px)`;
   lanes.append(head);
+  if (state.altHeld) {
+    const cut = document.createElement("div");
+    cut.className = "cut-guide";
+    cut.style.left = `calc(76px + ${(state.time / duration) * width}px)`;
+    lanes.append(cut);
+  }
   if (state.snapGuide != null) {
     const guide = document.createElement("div");
     guide.className = "snap-guide";
@@ -2339,13 +2498,7 @@ function drawTimeline() {
     };
     clipLane.lane.append(tick);
   });
-  const seek = (event, lane, exact = false) => {
-    const rect = lane.getBoundingClientRect();
-    let time = Z.clamp((event.clientX - rect.left) / rect.width, 0, 1) * duration;
-    time = magneticTime(time, rect.width, true);
-    state.time = time;
-    state.playing = false;
-    updatePlayButton();
+  const syncSnapGuide = () => {
     const guide = document.querySelector(".snap-guide");
     if (state.snapGuide != null) {
       if (guide) guide.style.left = `calc(76px + ${(state.snapGuide / duration) * width}px)`;
@@ -2358,15 +2511,40 @@ function drawTimeline() {
     } else if (guide) {
       guide.remove();
     }
+  };
+  const seek = (event, lane, exact = false) => {
+    const rect = lane.getBoundingClientRect();
+    let time = Z.clamp((event.clientX - rect.left) / rect.width, 0, 1) * duration;
+    if (state.altHeld) {
+      state.snapGuide = null;
+      state.time = time;
+    } else {
+      time = magneticTime(time, rect.width, event);
+      state.time = time;
+    }
+    state.playing = false;
+    updatePlayButton();
+    syncSnapGuide();
     const located = Z.locateTimeline(state.project.clips, state.time);
     if (located) DogSCPreview.seekCoalesced(located.source, exact, state.previewQuality);
     paintCanvas();
+    syncTransport();
   };
   clipLane.lane.onpointerdown = (event) => {
     if (event.target.closest(".handle, .zoom, .motion, .mosaic, .sticker-clip, .lane-empty, .marker")) return;
+    magneticSession.reset();
+    if (state.altHeld) {
+      const rect = clipLane.lane.getBoundingClientRect();
+      const time = Z.clamp((event.clientX - rect.left) / rect.width, 0, 1) * duration;
+      mutate(`/api/projects/${state.project.id}/split`, { time });
+      return;
+    }
     seek(event, clipLane.lane, false);
     const move = (next) => seek(next, clipLane.lane, false);
     const up = () => {
+      magneticSession.reset();
+      state.snapGuide = null;
+      document.querySelector(".snap-guide")?.remove();
       DogSCPreview.settle(state.previewQuality);
       const located = Z.locateTimeline(state.project.clips, state.time);
       if (located) DogSCPreview.seekCoalesced(located.source, true, state.previewQuality);
@@ -2382,19 +2560,23 @@ function drawTimeline() {
       const rect = clipLane.lane.getBoundingClientRect();
       const preview = Z.clamp((event.clientX - rect.left) / rect.width, 0, 1) * duration;
       state.hoverTime = preview;
-      let ghost = lanes.querySelector(".hover-playhead");
-      if (!ghost) {
-        ghost = document.createElement("div");
-        ghost.className = "hover-playhead";
-        lanes.append(ghost);
+      placeHoverGuide(lanes, duration, width, preview);
+      if (state.altHeld) {
+        let cut = lanes.querySelector(".cut-guide");
+        if (!cut) {
+          cut = document.createElement("div");
+          cut.className = "cut-guide";
+          lanes.append(cut);
+        }
+        cut.style.left = `calc(76px + ${(preview / duration) * width}px)`;
       }
-      ghost.style.left = `calc(76px + ${(preview / duration) * width}px)`;
       const located = Z.locateTimeline(state.project.clips, preview);
       if (located) DogSCPreview.seekCoalesced(located.source, false, state.previewQuality);
     };
     clipLane.lane.onpointerleave = () => {
       state.hoverTime = null;
       lanes.querySelector(".hover-playhead")?.remove();
+      if (!state.altHeld) lanes.querySelector(".cut-guide")?.remove();
       DogSCPreview.settle(state.previewQuality);
       const located = Z.locateTimeline(state.project.clips, state.time);
       if (located) DogSCPreview.seekCoalesced(located.source, true, state.previewQuality);
@@ -2406,6 +2588,7 @@ function drawTimeline() {
 function dragEdge(event, row, edge, duration, width) {
   event.preventDefault();
   event.stopPropagation();
+  magneticSession.reset();
   const startX = event.clientX;
   const origin = edge === "start" ? row.start : row.end;
   const lanes = document.querySelector("#lanes");
@@ -2420,22 +2603,14 @@ function dragEdge(event, row, edge, duration, width) {
     }
     return points;
   };
-  const snap = (time) => {
-    if (!state.magnetic) {
-      state.snapGuide = null;
-      return time;
-    }
-    const threshold = 8 / (width / Math.max(duration, 0.001));
-    let best = time;
-    let bestDist = threshold;
-    for (const point of magneticTargets()) {
-      const dist = Math.abs(point - time);
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = point;
-      }
-    }
-    state.snapGuide = bestDist < threshold ? best : null;
+  const snap = (time, pointerEvent) => {
+    const next = magneticResolve(time, {
+      width,
+      duration,
+      targets: magneticTargets,
+      initial: [origin],
+      shift: Boolean(pointerEvent?.shiftKey),
+    });
     const guide = document.querySelector(".snap-guide");
     if (state.snapGuide != null && lanes) {
       if (guide) guide.style.left = `calc(76px + ${(state.snapGuide / duration) * width}px)`;
@@ -2446,14 +2621,15 @@ function dragEdge(event, row, edge, duration, width) {
         lanes.append(node);
       }
     } else if (guide) guide.remove();
-    return best;
+    return next;
   };
   const move = (next) => {
     const delta = (next.clientX - startX) / width * duration;
-    const time = snap(Z.clamp(origin + delta, 0, duration));
+    const time = snap(Z.clamp(origin + delta, 0, duration), next);
     mutate(`/api/projects/${state.project.id}/trim`, { id: row.id, edge, time });
   };
   const up = () => {
+    magneticSession.reset();
     state.snapGuide = null;
     document.querySelector(".snap-guide")?.remove();
     window.removeEventListener("pointermove", move);
@@ -2508,6 +2684,14 @@ function aspectRatio(aspect, width, height) {
 }
 
 window.addEventListener("keydown", (event) => {
+  if (event.key === "Alt") {
+    if (!state.altHeld) {
+      state.altHeld = true;
+      document.body.classList.add("alt-cut");
+      if (state.view === "editor") drawTimeline();
+    }
+    return;
+  }
   if (event.target.matches("input, select, textarea")) return;
   if (event.key === "Escape") {
     if (closeFloatingUI()) {
@@ -2546,6 +2730,20 @@ window.addEventListener("keydown", (event) => {
       .then((project) => { state.project = project; state.selectedMarker = null; render(); })
       .catch((error) => toast(error.message));
   }
+});
+
+window.addEventListener("keyup", (event) => {
+  if (event.key === "Alt" && state.altHeld) {
+    state.altHeld = false;
+    document.body.classList.remove("alt-cut");
+    if (state.view === "editor") drawTimeline();
+  }
+});
+window.addEventListener("blur", () => {
+  if (!state.altHeld) return;
+  state.altHeld = false;
+  document.body.classList.remove("alt-cut");
+  if (state.view === "editor") drawTimeline();
 });
 
 async function boot() {

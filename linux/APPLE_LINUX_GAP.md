@@ -7,7 +7,7 @@
 | ID | Gap | Apple | Linux 现状 | 更好的 Linux 实现 | Web 现在？ |
 |---|---|---|---|---|---|
 | G01 | GPU 预览 | CIImage→CAMetalLayer，CADisplayLink | `<video>` + CSS transform | **Qt6 QQuickItem + Vulkan RHI**（或 Tauri+wgpu） | 否 → Qt6 |
-| G02 | 零容差 scrub | AVPlayer tolerance=0 | **加强**：Full ε≈0 settle + hover 幽灵头；Fast 粗 scrub | 原生解码纹理 | 部分 |
+| G02 | 零容差 scrub | AVPlayer tolerance=0 | **加强**：Full ε≈0 settle + hover 虚线引导 + 时间徽章；Fast 粗 scrub；Alt 切割引导 | 原生解码纹理 | 部分 |
 | G03 | 浮动录制岛 | 独立 NSPanel + morph spring 0.5/0.82 | **加强**：idle↔live morph；Qt 无边框窗仍为最优 | Qt / Wayland layer-shell | 部分 |
 | G04 | Continuous 圆角 | `cornerCurve = .continuous` | CSS 圆形 radius | Qt SDF squircle / Skia | 否 → Qt6 |
 | G06 | 指针流 | CGEvent | 仅 X11 PointerSampler | **libinput** / portal RD / 合成器 API | 否 |
@@ -27,7 +27,7 @@
 | G17 | 系统壁纸目录 | `~/.local/share/backgrounds` + portal | **已落地** `/api/wallpapers` 扫描 |
 | G18 | 真波形 | ffmpeg peaks | **已落地** `/peaks` + canvas |
 | G19 | 时间对齐胶片 | thumb-by-time | **已落地** `/thumb?t=` |
-| G20 | 磁吸到 clip/overlay 边 | 同 Apple targets | **已落地** scrub + **trim** + snap guide |
+| G20 | 磁吸到 clip/overlay 边 | 同 Apple targets | **已落地** capture/escape 滞回 + 抑制起始边 + scrub/trim guide |
 | G21 | Export Sheet | export_plan 估大小 | **已落地** 估大小 / 进度 / 选项 sheet |
 | G22 | Full / Fast 预览 | 原生档位 | **已落地** 菜单接线（Fast 降滤镜 + 放宽松 seek） |
 | G23 | 页面 handoff 动效 | View Transition / Qt stack | **已落地** `startViewTransition` + softEnter |
@@ -35,6 +35,10 @@
 | G24 | 实况摄像头 PiP | getUserMedia / Qt Multimedia | **已接线** getUserMedia（无设备时占位） |
 | G25 | focus-dot / mosaic / sticker 舞台 | Metal overlay | **已落地** overlays + **拖拽** / PiP 拖拽 |
 | G27 | 快捷键 ⌘E / fit-all / reduce-motion | AppKit menu | **已落地** |
+| G28 | Clip chrome 强调层级 | idle/hover/selected/editing | **已落地** hover 控点 + 描边层级 + 胶片 reveal |
+| G29 | 轨道显隐 | EditorTimelineTrackVisibility | **已落地** 时间线轨道菜单（运镜/3D/马赛克/贴图） |
+| G30 | Hover 时间徽章 | NativeTimelineHoverGuide | **已落地** 虚线 + 0:00.00 徽章 |
+| G31 | Option 切割引导 | Alt edit target | **已落地** Alt 虚线 + Alt-click 分割 |
 
 ## P2+ 与原生毕业路径
 
@@ -45,4 +49,4 @@
 | Ubuntu Wayland 采集 | **xdg-desktop-portal + PipeWire**（已有）/ GTK4+GStreamer | 门户契合度最高 |
 | 指针轨迹 | **libinput** / portal remote desktop | 浏览器拿不到 CGEvent 级流 |
 
-**结论：** Web Soft Silver 已收齐可复刻 P1（含 G09/G16/G17/G23/G26）。P0 预览真相源 / continuous 圆角 / 浮动录制窗的**最优解**仍是 **Qt6-QML-Vulkan**（`linux/native/qt6`）；Web 用 `corner-shape: squircle` 作过渡近似。
+**结论：** Web Soft Silver 已收齐可复刻 P1（含 G09/G16/G17/G20 滞回、G23/G26、G28–G31）。P0 预览真相源 / continuous 圆角 / 浮动录制窗的**最优解**仍是 **Qt6-QML-Vulkan**（`linux/native/qt6`）；Web 用 `corner-shape: squircle` 作 continuous 过渡近似。

@@ -467,13 +467,31 @@ ApplicationWindow {
                     }
                 }
 
-                Text {
+                Row {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.right: parent.right
                     anchors.rightMargin: 14
-                    text: qsTr("时间线 · stub")
-                    color: root.faint
-                    font.pixelSize: 11
+                    spacing: 8
+                    Rectangle {
+                        width: tracksLabel.implicitWidth + 16
+                        height: 28
+                        radius: 8
+                        color: root.well
+                        Text {
+                            id: tracksLabel
+                            anchors.centerIn: parent
+                            text: qsTr("轨道")
+                            color: root.muted
+                            font.pixelSize: 11
+                            font.weight: Font.Medium
+                        }
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: qsTr("磁吸 · 悬停")
+                        color: root.faint
+                        font.pixelSize: 11
+                    }
                 }
 
                 Rectangle {
@@ -544,7 +562,7 @@ ApplicationWindow {
                 }
             }
 
-            // Playhead + hover preview ghost + magnetic snap guide (G02 / G20 stubs)
+            // Playhead + hover guide badge + magnetic snap (G02 / G20 stubs)
             Rectangle {
                 anchors.top: timelineBar.bottom
                 anchors.bottom: parent.bottom
@@ -554,14 +572,41 @@ ApplicationWindow {
                 opacity: 0.9
                 z: 3
             }
-            Rectangle {
+            Item {
                 anchors.top: timelineBar.bottom
                 anchors.bottom: parent.bottom
                 x: parent.width * 0.41
                 width: 1
-                color: Qt.rgba(0.1, 0.12, 0.18, 0.35)
-                opacity: 0.8
-                z: 2
+                z: 4
+                Rectangle {
+                    anchors.top: parent.top
+                    anchors.topMargin: 18
+                    anchors.bottom: parent.bottom
+                    width: 1
+                    color: Qt.rgba(0.1, 0.12, 0.18, 0.42)
+                    opacity: 0.85
+                }
+                Rectangle {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top: parent.top
+                    width: 62
+                    height: 18
+                    radius: 9
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "#3a3d46" }
+                        GradientStop { position: 1.0; color: "#23262d" }
+                    }
+                    border.color: Qt.rgba(1, 1, 1, 0.14)
+                    border.width: 0.75
+                    Text {
+                        anchors.centerIn: parent
+                        text: "0:04.20"
+                        color: "#fdfdfe"
+                        font.pixelSize: 9
+                        font.weight: Font.Medium
+                        font.family: "ui-monospace"
+                    }
+                }
             }
             Rectangle {
                 anchors.top: timelineBar.bottom
