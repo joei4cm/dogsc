@@ -16,6 +16,9 @@ add_custom_command(TARGET dogsc_soft_silver_host POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_CURRENT_SOURCE_DIR}/main.qml
         $<TARGET_FILE_DIR:dogsc_soft_silver_host>/main.qml
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/PreviewSurface.qml
+        $<TARGET_FILE_DIR:dogsc_soft_silver_host>/PreviewSurface.qml
 )
 
 target_link_libraries(dogsc_soft_silver_host PRIVATE Qt6::Quick)

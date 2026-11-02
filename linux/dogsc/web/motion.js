@@ -75,14 +75,78 @@ const DogSCMotion = (() => {
       thumb = document.createElement("div");
       thumb.className = "rail-thumb";
       rail.prepend(thumb);
+      thumb._left = 0;
+      thumb._width = activeButton.getBoundingClientRect().width || 44;
     }
     const railBox = rail.getBoundingClientRect();
     const box = activeButton.getBoundingClientRect();
     const left = box.left - railBox.left - 4;
     const width = box.width;
     thumb.style.opacity = "1";
-    thumb.style.transform = `translateX(${left}px)`;
-    thumb.style.width = `${width}px`;
+    const fromLeft = Number(thumb._left ?? left);
+    const fromWidth = Number(thumb._width ?? width);
+    thumb._cancelLeft?.();
+    thumb._cancelWidth?.();
+    if (reduces() || (Math.abs(fromLeft - left) < 0.5 && Math.abs(fromWidth - width) < 0.5)) {
+      thumb.style.transform = `translateX(${left}px)`;
+      thumb.style.width = `${width}px`;
+      thumb._left = left;
+      thumb._width = width;
+      return;
+    }
+    // Drive transform/width with SpringMotion.settle (response 0.38, damping 1).
+    thumb.style.transition = "none";
+    thumb._cancelLeft = animate(fromLeft, left, "settle", (value) => {
+      thumb._left = value;
+      thumb.style.transform = `translateX(${value}px)`;
+    });
+    thumb._cancelWidth = animate(fromWidth, width, "settle", (value) => {
+      thumb._width = value;
+      thumb.style.width = `${value}px`;
+    });
+  }
+
+  /** Sliding white pill inside .segmented controls. */
+  function slideSegment(group, activeButton) {
+    if (!group || !activeButton) return;
+    let thumb = group.querySelector(".seg-thumb");
+    if (!thumb) {
+      thumb = document.createElement("div");
+      thumb.className = "seg-thumb";
+      group.prepend(thumb);
+      thumb._left = 0;
+      thumb._width = activeButton.getBoundingClientRect().width || 40;
+    }
+    const groupBox = group.getBoundingClientRect();
+    const box = activeButton.getBoundingClientRect();
+    const left = box.left - groupBox.left;
+    const width = box.width;
+    const fromLeft = Number(thumb._left ?? left);
+    const fromWidth = Number(thumb._width ?? width);
+    thumb._cancelLeft?.();
+    thumb._cancelWidth?.();
+    if (reduces() || (Math.abs(fromLeft - left) < 0.5 && Math.abs(fromWidth - width) < 0.5)) {
+      thumb.style.transform = `translateX(${left}px)`;
+      thumb.style.width = `${width}px`;
+      thumb._left = left;
+      thumb._width = width;
+      return;
+    }
+    thumb.style.transition = "none";
+    thumb._cancelLeft = animate(fromLeft, left, "settle", (value) => {
+      thumb._left = value;
+      thumb.style.transform = `translateX(${value}px)`;
+    });
+    thumb._cancelWidth = animate(fromWidth, width, "settle", (value) => {
+      thumb._width = value;
+      thumb.style.width = `${value}px`;
+    });
+  }
+
+  function syncSegments(root = document) {
+    root.querySelectorAll(".segmented").forEach((group) => {
+      slideSegment(group, group.querySelector("button.active") || group.querySelector("button"));
+    });
   }
 
   function press(node) {
@@ -93,14 +157,17 @@ const DogSCMotion = (() => {
     );
   }
 
-  function morphOpen(node, open) {
+  function morphOpen(node, open, baseTransform = "") {
     if (!node) return;
+    const prefix = baseTransform ? `${baseTransform} ` : "";
     node.style.transition = cssTransition("morph");
     node.dataset.open = open ? "1" : "0";
     node.style.opacity = open ? "1" : "0";
-    node.style.transform = open ? "translateY(0) scale(1)" : "translateY(8px) scale(0.96)";
+    node.style.transform = open
+      ? `${prefix}translateY(0) scale(1)`
+      : `${prefix}translateY(8px) scale(0.96)`;
     node.style.pointerEvents = open ? "auto" : "none";
   }
 
-  return { reduces, animate, cssTransition, slideThumb, press, morphOpen, PRESETS };
+  return { reduces, animate, cssTransition, slideThumb, slideSegment, syncSegments, press, morphOpen, PRESETS };
 })();

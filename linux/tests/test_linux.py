@@ -13,8 +13,9 @@ import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from dogsc.export_plan import build_export, canvas_size, preview_sample
+from dogsc.export_plan import build_export, canvas_size, estimate_export, preview_sample
 from dogsc.media import probe
+from dogsc.model import clamp_crop, migrate
 from dogsc.platform import Toolchain, choose_backend, classify_audio, family_of, parse_os_release, parse_pactl_sources, session_of
 from dogsc.portal import parse_node_id
 from dogsc.project import import_media
@@ -85,6 +86,25 @@ class CaptureCommandTests(unittest.TestCase):
     def test_portal_node_parser(self):
         self.assertEqual(parse_node_id([(7, {"size": (100, 100)})]), 7)
         self.assertEqual(parse_node_id([{"node_id": 9}]), 9)
+
+
+class CropModelTests(unittest.TestCase):
+    def test_clamp_crop_and_migrate(self):
+        crop = clamp_crop({"x": -1, "y": 0.95, "width": 3, "height": 0.01})
+        self.assertGreaterEqual(crop["x"], 0)
+        self.assertGreaterEqual(crop["width"], 0.02)
+        self.assertLessEqual(crop["x"] + crop["width"], 1.000001)
+        project = migrate({
+            "id": "crop-test",
+            "clips": [{"id": "c", "src_in": 0, "src_out": 1, "speed": 1}],
+            "canvas": {"crop": {"x": 0.1, "y": 0.2, "width": 0.5, "height": 0.4}},
+            "export": {"resolution": "1080p", "fps": 30},
+            "media": {"width": 1280, "height": 720},
+        })
+        self.assertEqual(project["canvas"]["crop"]["x"], 0.1)
+        estimate = estimate_export(project)
+        self.assertEqual(estimate["fps"], 30)
+        self.assertGreater(estimate["bytes"], 0)
 
 
 class ZoomTests(unittest.TestCase):
