@@ -415,5 +415,57 @@ class FocusEffectApiTests(unittest.TestCase):
                 thread.join(timeout=2)
 
 
+class ClipAudioAndPauseTests(unittest.TestCase):
+    def test_clip_audio_override_roundtrip(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            os.environ["DOGSC_HOME"] = str(Path(temporary) / "home")
+            project = create_demo()
+            clip_id = project["clips"][0]["id"]
+            server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                port = server.server_address[1]
+                body = json.dumps({
+                    "id": clip_id,
+                    "system_volume": 0.4,
+                    "system_muted": True,
+                    "mic_volume": 1.5,
+                }).encode()
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/api/projects/{project['id']}/clip-audio",
+                    data=body,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                updated = json.load(urllib.request.urlopen(request, timeout=5))
+                audio = next(clip for clip in updated["clips"] if clip["id"] == clip_id)["audio"]
+                self.assertEqual(audio["system_volume"], 0.4)
+                self.assertTrue(audio["system_muted"])
+                self.assertEqual(audio["mic_volume"], 1.5)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+    def test_fixture_pause_and_resume(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            os.environ["DOGSC_HOME"] = str(Path(temporary) / "home")
+            recorder = Recorder()
+            recorder.start({"backend": "fixture", "duration": 0, "fps": 30})
+            self.assertTrue(recorder.active())
+            paused = recorder.pause()
+            self.assertTrue(paused["paused"])
+            self.assertTrue(paused["active"])
+            frozen = paused["elapsed"]
+            time.sleep(0.35)
+            still = recorder.status()
+            self.assertAlmostEqual(still["elapsed"], frozen, delta=0.08)
+            resumed = recorder.resume()
+            self.assertFalse(resumed["paused"])
+            self.assertTrue(resumed["active"])
+            recorder.discard()
+
+
 if __name__ == "__main__":
     unittest.main()

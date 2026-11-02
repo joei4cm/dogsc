@@ -145,6 +145,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(APP.recorder.stop())
             if path == "/api/record/discard":
                 return self._json(APP.recorder.discard())
+            if path == "/api/record/pause":
+                return self._json(APP.recorder.pause())
+            if path == "/api/record/resume":
+                return self._json(APP.recorder.resume())
             if path == "/api/record/marker":
                 body = self._body()
                 return self._json(APP.recorder.mark(str(body.get("label") or "")))
@@ -325,6 +329,8 @@ class Handler(BaseHTTPRequestHandler):
             project["clips"], project["zooms"] = set_speed(
                 project["clips"], project["zooms"], str(body["id"]), float(body["speed"])
             )
+        elif action == "clip-audio":
+            _update_clip_audio(project, body)
         elif action == "zoom":
             zoom = add_manual_zoom(
                 project["clips"], project["zooms"], float(body["time"]),
@@ -680,6 +686,16 @@ def _merge_audio(audio: dict, incoming: dict) -> dict:
         if key in incoming:
             audio[key] = bool(incoming[key])
     return audio
+
+
+def _update_clip_audio(project: dict, body: dict) -> None:
+    clip_id = str(body.get("id") or "")
+    for clip in project["clips"]:
+        if clip.get("id") != clip_id:
+            continue
+        clip["audio"] = _merge_audio(clip.get("audio") or {}, body)
+        return
+    raise DogSCError("找不到这个片段。")
 
 
 def _merge_camera(camera: dict, incoming: dict) -> dict:

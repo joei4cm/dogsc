@@ -1,11 +1,11 @@
 # Soft Silver · Apple parity polish（Oil Pro）
 
-对照本轮 `home` / `countdown` / `editor` / `focus` 截图：
+对照本轮截图：
 
-1. 【已落地】首页录制岛仍是唯一主角；倒计时 orb 居中替换 capsule，铂金银质感。
-2. 【已落地】停录决策岛 + live 丢弃（API `/api/record/discard`）。
-3. 【已落地】时间线标记 chip + 列表面板（定位 / 改名 / 删除）。
-4. 【已落地】运镜「焦点虚化」：清晰范围 / 模糊 / 羽化 / 暗角；预览 radial overlay。
-5. 【路径】导出侧 FocusEffect、录制 pause/resume、真 continuous / Metal → 后续 / Qt6。
+1. 【已落地】倒计时 orb / 丢弃决策 / 标记列表 / 焦点虚化预览。
+2. 【已落地】摄像头 PiP：圆角、描边、透明、阴影。
+3. 【已落地】马赛克柔化/突出 + 贴纸基础 inspector。
+4. 【已落地】片段音频覆写、开场 stagger/include、录制 pause/resume。
+5. 【路径】贴纸外观补齐、开场顺序、导出选区/多选、场景预设、真 continuous / Metal → 后续 / Qt6。
 
-截图目录：`.oil-ui/apple-parity-polish/{home,countdown,editor,focus}/`
+截图：`home` `countdown` `editor` `focus` `camera` `opening` `audio`

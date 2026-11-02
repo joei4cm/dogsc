@@ -713,9 +713,11 @@ function recorderCapsuleHtml() {
     </div>`;
   }
   if (live) {
+    const paused = !!state.recording.paused;
     return `<div class="recorder-dock">
-      <div class="recorder-capsule is-live" data-mode="live">
-        <div class="recording-timer" id="elapsed">${formatTime(state.recording.elapsed)}</div>
+      <div class="recorder-capsule is-live ${paused ? "is-paused" : ""}" data-mode="live">
+        <div class="recording-timer" id="elapsed">${formatTime(state.recording.elapsed)}${paused ? `<em>${state.lang === "zh" ? "已暂停" : "Paused"}</em>` : ""}</div>
+        <button class="rec-toggle" id="toggle-pause" title="${paused ? t("playing") : t("pause")}" aria-pressed="${paused}">${paused ? ICONS.play : ICONS.pause}</button>
         <button class="rec-toggle" id="add-marker" title="${t("marker")}">${ICONS.marker}</button>
         <button class="rec-toggle danger-quiet" id="discard-live" title="${t("discard")}">${ICONS.trash}</button>
         <button class="record-go live" id="stop-record" title="${t("stop")}"><span class="dot"><i></i></span></button>
@@ -1182,14 +1184,22 @@ function mockupPanel(canvas) {
 
 function openingInspector() {
   const opening = state.project.opening || {};
+  const zh = state.lang === "zh";
   return `
     <h2>${t("opening")}</h2>
-    <label class="row"><input id="opening-enabled" type="checkbox" ${opening.enabled ? "checked" : ""}> 启用开场</label>
+    <label class="row"><input id="opening-enabled" type="checkbox" ${opening.enabled ? "checked" : ""}> ${zh ? "启用开场" : "Enable opening"}</label>
     <div class="section">
       ${Object.keys(OPENING_LABELS.zh).map((id) => `<button class="choice-card ${opening.preset === id ? "active" : ""}" data-opening="${id}"><strong>${OPENING_LABELS[state.lang][id]}</strong></button>`).join("")}
     </div>
-    <label class="field">时长<input id="opening-duration" type="range" min="0.4" max="4" step="0.1" value="${opening.duration || 1.4}"></label>
-    <label class="field">节奏<select id="opening-curve">${options(["smooth","swift","gentle"], opening.curve || "smooth", { smooth: "平滑", swift: "利落", gentle: "柔和" })}</select></label>`;
+    <label class="field">${zh ? "时长" : "Duration"}<input id="opening-duration" type="range" min="0.4" max="4" step="0.1" value="${opening.duration || 1.4}"></label>
+    <label class="field">${zh ? "节奏" : "Curve"}<select id="opening-curve">${options(["smooth","swift","gentle"], opening.curve || "smooth", { smooth: "平滑", swift: "利落", gentle: "柔和" })}</select></label>
+    <label class="field">${fieldValue(zh ? "错峰" : "Stagger", `${Number(opening.stagger ?? 0.12).toFixed(2)}s`)}<input id="opening-stagger" type="range" min="0" max="1" step="0.02" value="${opening.stagger ?? 0.12}"></label>
+    <div class="section" style="margin-top:12px">
+      <div class="section-title">${zh ? "包含元素" : "Include"}</div>
+      <label class="row"><input id="opening-include-screen" type="checkbox" ${opening.include_screen !== false ? "checked" : ""}> ${zh ? "屏幕" : "Screen"}</label>
+      <label class="row"><input id="opening-include-camera" type="checkbox" ${opening.include_camera !== false ? "checked" : ""}> ${t("camera")}</label>
+      <label class="row"><input id="opening-include-stickers" type="checkbox" ${opening.include_stickers !== false ? "checked" : ""}> ${t("sticker")}</label>
+    </div>`;
 }
 
 function defaultFocusEffect() {
@@ -1264,11 +1274,38 @@ function motionInspector() {
       <button class="btn ghost" id="delete-motion">${t("delete")}</button>` : `<div class="empty-action scope-card">
         <p class="note">${zh ? "在播放头加入 3D 运镜。" : "Add a 3D motion at the playhead."}</p>
       </div>`)}
-    ${state.selectedMosaic ? `
+    ${state.selectedMosaic ? mosaicInspectorHtml(state.selectedMosaic, zh) : ""}
+    ${state.selectedSticker ? stickerInspectorHtml(state.selectedSticker, zh) : ""}`;
+}
+
+function mosaicInspectorHtml(mosaic, zh) {
+  const style = mosaic.style === "spotlight" ? "spotlight" : "blur";
+  return `
       <div class="section"><div class="section-title">${t("mosaic")}</div>
-        <label class="field">${fieldValue(zh ? "强度" : "Strength", `${Math.round((state.selectedMosaic.intensity || 0.55) * 100)}%`)}<input id="mosaic-intensity" type="range" min="0.1" max="1" step="0.05" value="${state.selectedMosaic.intensity || 0.55}"></label>
+        <div class="segmented" style="margin-bottom:10px">
+          <button type="button" data-mosaic-style="blur" class="${style === "blur" ? "active" : ""}">${zh ? "柔化" : "Blur"}</button>
+          <button type="button" data-mosaic-style="spotlight" class="${style === "spotlight" ? "active" : ""}">${zh ? "突出" : "Spotlight"}</button>
+        </div>
+        ${style === "blur"
+          ? `<label class="field">${fieldValue(zh ? "强度" : "Strength", `${Math.round((mosaic.intensity || 0.55) * 100)}%`)}<input id="mosaic-intensity" type="range" min="0.1" max="1" step="0.05" value="${mosaic.intensity || 0.55}"></label>`
+          : `<label class="field">${fieldValue(zh ? "暗度" : "Dimming", `${Math.round((mosaic.dimming || 0.22) * 100)}%`)}<input id="mosaic-dimming" type="range" min="0" max="0.75" step="0.01" value="${mosaic.dimming || 0.22}"></label>`}
+        <label class="field">${fieldValue(zh ? "圆角" : "Radius", `${Math.round((mosaic.corner_radius || 0.08) * 100)}%`)}<input id="mosaic-radius" type="range" min="0" max="0.5" step="0.01" value="${mosaic.corner_radius || 0.08}"></label>
+        <label class="field">${fieldValue(zh ? "宽度" : "Width", `${Math.round((mosaic.width || 0.3) * 100)}%`)}<input id="mosaic-width" type="range" min="0.05" max="1" step="0.01" value="${mosaic.width || 0.3}"></label>
+        <label class="field">${fieldValue(zh ? "高度" : "Height", `${Math.round((mosaic.height || 0.25) * 100)}%`)}<input id="mosaic-height" type="range" min="0.05" max="1" step="0.01" value="${mosaic.height || 0.25}"></label>
         <button class="btn" id="delete-mosaic">${t("delete")}</button>
-      </div>` : ""}`;
+      </div>`;
+}
+
+function stickerInspectorHtml(sticker, zh) {
+  return `
+      <div class="section"><div class="section-title">${t("sticker")}</div>
+        <label class="field">${fieldValue(zh ? "宽度" : "Width", `${Math.round((sticker.width || 0.22) * 100)}%`)}<input id="sticker-width" type="range" min="0.05" max="0.9" step="0.01" value="${sticker.width || 0.22}"></label>
+        <label class="field">${fieldValue(zh ? "旋转" : "Rotate", `${Math.round(sticker.rotation || 0)}°`)}<input id="sticker-rotation" type="range" min="-180" max="180" step="1" value="${sticker.rotation || 0}"></label>
+        <label class="field">${fieldValue(zh ? "透明度" : "Opacity", `${Math.round((sticker.opacity == null ? 1 : sticker.opacity) * 100)}%`)}<input id="sticker-opacity" type="range" min="0.05" max="1" step="0.01" value="${sticker.opacity == null ? 1 : sticker.opacity}"></label>
+        <label class="field">${fieldValue(zh ? "圆角" : "Radius", `${Math.round(sticker.corner_radius || 18)}`)}<input id="sticker-radius" type="range" min="0" max="80" step="1" value="${sticker.corner_radius || 18}"></label>
+        <label class="field">${zh ? "动画" : "Animation"}<select id="sticker-animation">${options(["none","pop","fade","slide"], sticker.animation || "pop", { none: zh ? "无" : "None", pop: "Pop", fade: zh ? "淡入" : "Fade", slide: zh ? "滑入" : "Slide" })}</select></label>
+        <button class="btn" id="delete-sticker">${t("delete")}</button>
+      </div>`;
 }
 
 function cursorInspector() {
@@ -1286,38 +1323,55 @@ function cursorInspector() {
 
 function cameraInspector() {
   const camera = state.project.camera || {};
+  const zh = state.lang === "zh";
   const mediaNote = camera.media
-    ? (state.lang === "zh" ? `已收录摄像头轨：${camera.media}` : `Recorded camera track: ${camera.media}`)
-    : (state.lang === "zh" ? "预览优先用本机摄像头；录制时可勾选画中画副轨。" : "Live preview uses the local camera; enable PiP during capture to record a sidecar.");
+    ? (zh ? `已收录摄像头轨：${camera.media}` : `Recorded camera track: ${camera.media}`)
+    : (zh ? "预览优先用本机摄像头；录制时可勾选画中画副轨。" : "Live preview uses the local camera; enable PiP during capture to record a sidecar.");
   return `
     <h2>${t("camera")}</h2>
     <p class="note">${escapeHtml(mediaNote)}</p>
-    <label class="row"><input id="camera-enabled" type="checkbox" ${camera.enabled ? "checked" : ""}> 显示摄像头</label>
-    <label class="field">形状<select id="camera-shape">${options(["circle","square","horizontal","vertical","original"], camera.shape || "circle", { circle: "圆形", square: "方形", horizontal: "横向", vertical: "纵向", original: "原始比例" })}</select></label>
-    <label class="field">大小<input id="camera-size" type="range" min="0.1" max="0.45" step="0.01" value="${camera.size || 0.22}"></label>
-    <label class="field">水平<input id="camera-x" type="range" min="0" max="1" step="0.01" value="${camera.x ?? 0.82}"></label>
-    <label class="field">垂直<input id="camera-y" type="range" min="0" max="1" step="0.01" value="${camera.y ?? 0.78}"></label>
-    <label class="row"><input id="camera-mirror" type="checkbox" ${camera.mirror ? "checked" : ""}> 镜像</label>
+    <label class="row"><input id="camera-enabled" type="checkbox" ${camera.enabled ? "checked" : ""}> ${zh ? "显示摄像头" : "Show camera"}</label>
+    <label class="field">${zh ? "形状" : "Shape"}<select id="camera-shape">${options(["circle","square","horizontal","vertical","original"], camera.shape || "circle", { circle: "圆形", square: "方形", horizontal: "横向", vertical: "纵向", original: "原始比例" })}</select></label>
+    <label class="field">${fieldValue(zh ? "大小" : "Size", `${Math.round((camera.size || 0.22) * 100)}%`)}<input id="camera-size" type="range" min="0.1" max="0.45" step="0.01" value="${camera.size || 0.22}"></label>
+    <label class="field">${fieldValue(zh ? "水平" : "X", `${Math.round((camera.x ?? 0.82) * 100)}%`)}<input id="camera-x" type="range" min="0" max="1" step="0.01" value="${camera.x ?? 0.82}"></label>
+    <label class="field">${fieldValue(zh ? "垂直" : "Y", `${Math.round((camera.y ?? 0.78) * 100)}%`)}<input id="camera-y" type="range" min="0" max="1" step="0.01" value="${camera.y ?? 0.78}"></label>
+    <label class="field">${fieldValue(zh ? "圆角" : "Round", `${Math.round((camera.roundness ?? 1) * 100)}%`)}<input id="camera-roundness" type="range" min="0" max="1" step="0.01" value="${camera.roundness ?? 1}"></label>
+    <label class="field">${fieldValue(zh ? "描边" : "Border", `${Math.round(camera.border ?? 3)}`)}<input id="camera-border" type="range" min="0" max="16" step="1" value="${camera.border ?? 3}"></label>
+    <label class="field">${zh ? "描边颜色" : "Border color"}<input id="camera-border-color" type="color" value="${camera.border_color || "#ffffff"}"></label>
+    <label class="field">${fieldValue(zh ? "透明度" : "Opacity", `${Math.round((camera.opacity == null ? 1 : camera.opacity) * 100)}%`)}<input id="camera-opacity" type="range" min="0.1" max="1" step="0.01" value="${camera.opacity == null ? 1 : camera.opacity}"></label>
+    <label class="field">${fieldValue(zh ? "阴影" : "Shadow", `${Math.round((camera.shadow ?? 0.35) * 100)}%`)}<input id="camera-shadow" type="range" min="0" max="1" step="0.05" value="${camera.shadow ?? 0.35}"></label>
+    <label class="row"><input id="camera-mirror" type="checkbox" ${camera.mirror ? "checked" : ""}> ${zh ? "镜像" : "Mirror"}</label>
     <p class="note">${t("note")}</p>`;
 }
 
 function audioInspector() {
   const audio = state.project.audio || {};
   const clip = Z.locateTimeline(state.project.clips, state.time)?.clip;
+  const clipAudio = clip?.audio || {};
+  const zh = state.lang === "zh";
   return `
     <h2>${t("audio")}</h2>
-    <div class="section-title">调音台</div>
-    <label class="field">系统声音<input id="system-volume" type="range" min="0" max="2" step="0.05" value="${audio.system_volume ?? 1}"></label>
-    <label class="row"><input id="system-muted" type="checkbox" ${audio.system_muted ? "checked" : ""}> 静音系统声音</label>
-    <label class="field">麦克风<input id="mic-volume" type="range" min="0" max="2" step="0.05" value="${audio.mic_volume ?? 1}"></label>
-    <label class="row"><input id="mic-muted" type="checkbox" ${audio.mic_muted ? "checked" : ""}> 静音麦克风</label>
+    <div class="section-title">${zh ? "总线调音台" : "Master mixer"}</div>
+    <label class="field">${zh ? "系统声音" : "System"}<input id="system-volume" type="range" min="0" max="2" step="0.05" value="${audio.system_volume ?? 1}"></label>
+    <label class="row"><input id="system-muted" type="checkbox" ${audio.system_muted ? "checked" : ""}> ${zh ? "静音系统声音" : "Mute system"}</label>
+    <label class="field">${zh ? "麦克风" : "Microphone"}<input id="mic-volume" type="range" min="0" max="2" step="0.05" value="${audio.mic_volume ?? 1}"></label>
+    <label class="row"><input id="mic-muted" type="checkbox" ${audio.mic_muted ? "checked" : ""}> ${zh ? "静音麦克风" : "Mute mic"}</label>
+    ${clip ? `
+      <div class="section" style="margin-top:16px">
+        <div class="section-title">${zh ? "当前片段覆写" : "Clip override"}</div>
+        <p class="note">${zh ? "只影响播放头所在片段；留默认则跟随总线。" : "Applies only to the clip under the playhead."}</p>
+        <label class="field">${zh ? "片段系统音量" : "Clip system"}<input id="clip-system-volume" type="range" min="0" max="2" step="0.05" value="${clipAudio.system_volume ?? audio.system_volume ?? 1}"></label>
+        <label class="row"><input id="clip-system-muted" type="checkbox" ${clipAudio.system_muted ? "checked" : ""}> ${zh ? "静音此片段系统声" : "Mute clip system"}</label>
+        <label class="field">${zh ? "片段麦克风" : "Clip mic"}<input id="clip-mic-volume" type="range" min="0" max="2" step="0.05" value="${clipAudio.mic_volume ?? audio.mic_volume ?? 1}"></label>
+        <label class="row"><input id="clip-mic-muted" type="checkbox" ${clipAudio.mic_muted ? "checked" : ""}> ${zh ? "静音此片段麦克风" : "Mute clip mic"}</label>
+      </div>` : ""}
     <div class="section" style="margin-top:18px">
       <div class="section-title">${t("export")}</div>
       <label class="field">${t("resolution")}<select id="resolution">${options(["source", "1080p", "1440p", "4k"], state.project.export.resolution)}</select></label>
       <label class="field">${t("fps")}<select id="export-fps">${options(["30", "60"], String(state.project.export.fps))}</select></label>
     </div>
     ${clip ? `
-      <div class="section"><div class="section-title">当前片段</div>
+      <div class="section"><div class="section-title">${zh ? "当前片段" : "Clip"}</div>
         <label class="field">${t("speed")}<input id="speed" type="range" min="0.5" max="4" step="0.25" value="${clip.speed || 1}"></label>
         <div class="actions" style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn" id="move-earlier">${t("earlier")}</button>
@@ -1459,6 +1513,7 @@ function bindHome() {
   document.querySelector("#discard-live")?.addEventListener("click", discardLiveRecording);
   document.querySelector("#discard-record")?.addEventListener("click", discardRecordDecision);
   document.querySelector("#save-record")?.addEventListener("click", saveRecordDecision);
+  document.querySelector("#toggle-pause")?.addEventListener("click", toggleRecordPause);
   document.querySelector("#add-marker")?.addEventListener("click", () => api("/api/record/marker", { method: "POST", body: {} }).catch((error) => toast(error.message)));
   const countdownSel = document.querySelector("#countdown-sel");
   if (countdownSel) {
@@ -1827,6 +1882,10 @@ function bindInspectorFields() {
     ["#opening-enabled", (v, el) => meta({ opening: { ...state.project.opening, enabled: el.checked } }), "change"],
     ["#opening-duration", (v) => meta({ opening: { ...state.project.opening, duration: Number(v) } })],
     ["#opening-curve", (v) => meta({ opening: { ...state.project.opening, curve: v } })],
+    ["#opening-stagger", (v) => meta({ opening: { ...state.project.opening, stagger: Number(v) } })],
+    ["#opening-include-screen", (v, el) => meta({ opening: { ...state.project.opening, include_screen: el.checked } }), "change"],
+    ["#opening-include-camera", (v, el) => meta({ opening: { ...state.project.opening, include_camera: el.checked } }), "change"],
+    ["#opening-include-stickers", (v, el) => meta({ opening: { ...state.project.opening, include_stickers: el.checked } }), "change"],
     ["#zoom-scale", (v) => updateZoom({ scale: Number(v) })],
     ["#zoom-enter", (v) => updateZoom({ enter: Number(v) })],
     ["#zoom-exit", (v) => updateZoom({ exit: Number(v) })],
@@ -1840,6 +1899,15 @@ function bindInspectorFields() {
     ["#perspective", (v) => updateMotion({ perspective: Number(v) })],
     ["#motion-scale", (v) => updateMotion({ scale: Number(v) })],
     ["#mosaic-intensity", (v) => updateMosaic({ intensity: Number(v) })],
+    ["#mosaic-dimming", (v) => updateMosaic({ dimming: Number(v) })],
+    ["#mosaic-radius", (v) => updateMosaic({ corner_radius: Number(v) })],
+    ["#mosaic-width", (v) => updateMosaic({ width: Number(v) })],
+    ["#mosaic-height", (v) => updateMosaic({ height: Number(v) })],
+    ["#sticker-width", (v) => updateSticker({ width: Number(v) })],
+    ["#sticker-rotation", (v) => updateSticker({ rotation: Number(v) })],
+    ["#sticker-opacity", (v) => updateSticker({ opacity: Number(v) })],
+    ["#sticker-radius", (v) => updateSticker({ corner_radius: Number(v) })],
+    ["#sticker-animation", (v) => updateSticker({ animation: v })],
     ["#cursor-size", (v) => meta({ cursor: { ...state.project.cursor, size: Number(v) } })],
     ["#click-effect", (v) => meta({ cursor: { ...state.project.cursor, click_effect: v } })],
     ["#cursor-motion", (v) => meta({ cursor: { ...state.project.cursor, motion: v } })],
@@ -1849,11 +1917,20 @@ function bindInspectorFields() {
     ["#camera-size", (v) => meta({ camera: { ...state.project.camera, size: Number(v) } })],
     ["#camera-x", (v) => meta({ camera: { ...state.project.camera, x: Number(v) } })],
     ["#camera-y", (v) => meta({ camera: { ...state.project.camera, y: Number(v) } })],
+    ["#camera-roundness", (v) => meta({ camera: { ...state.project.camera, roundness: Number(v) } })],
+    ["#camera-border", (v) => meta({ camera: { ...state.project.camera, border: Number(v) } })],
+    ["#camera-border-color", (v) => meta({ camera: { ...state.project.camera, border_color: v } })],
+    ["#camera-opacity", (v) => meta({ camera: { ...state.project.camera, opacity: Number(v) } })],
+    ["#camera-shadow", (v) => meta({ camera: { ...state.project.camera, shadow: Number(v) } })],
     ["#camera-mirror", (v, el) => meta({ camera: { ...state.project.camera, mirror: el.checked } }), "change"],
     ["#system-volume", (v) => meta({ audio: { ...state.project.audio, system_volume: Number(v) } })],
     ["#mic-volume", (v) => meta({ audio: { ...state.project.audio, mic_volume: Number(v) } })],
     ["#system-muted", (v, el) => meta({ audio: { ...state.project.audio, system_muted: el.checked } }), "change"],
     ["#mic-muted", (v, el) => meta({ audio: { ...state.project.audio, mic_muted: el.checked } }), "change"],
+    ["#clip-system-volume", (v) => updateClipAudio({ system_volume: Number(v) })],
+    ["#clip-mic-volume", (v) => updateClipAudio({ mic_volume: Number(v) })],
+    ["#clip-system-muted", (v, el) => updateClipAudio({ system_muted: el.checked }), "change"],
+    ["#clip-mic-muted", (v, el) => updateClipAudio({ mic_muted: el.checked }), "change"],
     ["#speed", (v) => mutate(`/api/projects/${state.project.id}/speed`, { id: Z.locateTimeline(state.project.clips, state.time).clip.id, speed: Number(v) })],
   ];
   map.forEach(([selector, handler, eventName]) => {
@@ -1872,6 +1949,14 @@ function bindInspectorFields() {
   document.querySelector("#delete-mosaic")?.addEventListener("click", async () => {
     state.project = await api(`/api/projects/${state.project.id}/mosaics/${state.selectedMosaic.id}`, { method: "DELETE" });
     state.selectedMosaic = null; render();
+  });
+  document.querySelector("#delete-sticker")?.addEventListener("click", async () => {
+    if (!state.selectedSticker) return;
+    state.project = await api(`/api/projects/${state.project.id}/stickers/${state.selectedSticker.id}`, { method: "DELETE" });
+    state.selectedSticker = null; render();
+  });
+  document.querySelectorAll("[data-mosaic-style]").forEach((node) => {
+    node.onclick = () => updateMosaic({ style: node.dataset.mosaicStyle });
   });
   document.querySelector("#delete-clip")?.addEventListener("click", () => {
     const clip = Z.locateTimeline(state.project.clips, state.time)?.clip;
@@ -2010,6 +2095,23 @@ async function updateMosaic(body) {
   if (!state.selectedMosaic) return;
   await mutate(`/api/projects/${state.project.id}/mosaic-update`, { id: state.selectedMosaic.id, ...body });
 }
+async function updateSticker(body) {
+  if (!state.selectedSticker) return;
+  await mutate(`/api/projects/${state.project.id}/sticker-update`, { id: state.selectedSticker.id, ...body });
+}
+async function updateClipAudio(body) {
+  const clip = Z.locateTimeline(state.project.clips, state.time)?.clip;
+  if (!clip) return;
+  await mutate(`/api/projects/${state.project.id}/clip-audio`, { id: clip.id, ...body });
+}
+async function toggleRecordPause() {
+  try {
+    const path = state.recording.paused ? "/api/record/resume" : "/api/record/pause";
+    state.recording = await api(path, { method: "POST", body: {} });
+    render();
+    if (state.recording.active && !state.recording.paused) pollRecording();
+  } catch (error) { toast(error.message); }
+}
 
 async function mutate(path, body) {
   try {
@@ -2114,8 +2216,14 @@ async function pollRecording() {
   if (state.recordDecision || state.countdown != null) return;
   try { state.recording = await api("/api/record"); } catch (error) { return; }
   const elapsed = document.querySelector("#elapsed");
-  if (elapsed) elapsed.textContent = formatTime(state.recording.elapsed || 0);
-  if (state.recording.active) setTimeout(pollRecording, 300);
+  if (elapsed) {
+    const paused = state.recording.paused ? `<em>${state.lang === "zh" ? "已暂停" : "Paused"}</em>` : "";
+    elapsed.innerHTML = `${formatTime(state.recording.elapsed || 0)}${paused}`;
+  }
+  const capsule = document.querySelector(".recorder-capsule.is-live");
+  if (capsule) capsule.classList.toggle("is-paused", !!state.recording.paused);
+  if (state.recording.active && !state.recording.paused) setTimeout(pollRecording, 300);
+  else if (state.recording.active && state.recording.paused) setTimeout(pollRecording, 800);
   else if (document.querySelector(".record-go.live")) render();
 }
 
@@ -2360,12 +2468,17 @@ function paintStageOverlays() {
     const intensity = Number(item.intensity || 0.55);
     const blur = 4 + intensity * 18;
     const selected = state.selectedMosaic && item.id === state.selectedMosaic.id;
-    const alpha = (0.12 + intensity * 0.25).toFixed(3);
+    const spotlight = item.style === "spotlight";
+    const dim = Number(item.dimming || 0.22);
+    const alpha = spotlight ? dim.toFixed(3) : (0.12 + intensity * 0.25).toFixed(3);
     const radius = ((item.corner_radius || 0.08) * 40).toFixed(1);
+    const fill = spotlight
+      ? `box-shadow:0 0 0 9999px rgba(8,10,14,${alpha});background:transparent;backdrop-filter:none`
+      : `backdrop-filter:blur(${blur}px);background:rgba(20,22,28,${alpha})`;
     parts.push(
-      `<div class="overlay-mosaic${selected ? " selected" : ""}" data-overlay="mosaic" data-id="${item.id}" `
+      `<div class="overlay-mosaic${selected ? " selected" : ""}${spotlight ? " is-spotlight" : ""}" data-overlay="mosaic" data-id="${item.id}" `
       + `style="left:${item.x * 100}%;top:${item.y * 100}%;width:${item.width * 100}%;height:${item.height * 100}%;`
-      + `border-radius:${radius}px;backdrop-filter:blur(${blur}px);background:rgba(20,22,28,${alpha})">`
+      + `border-radius:${radius}px;${fill}">`
       + `<i class="overlay-handle" data-handle="nw"></i><i class="overlay-handle" data-handle="ne"></i>`
       + `<i class="overlay-handle" data-handle="se"></i><i class="overlay-handle" data-handle="sw"></i></div>`
     );
@@ -2940,7 +3053,7 @@ function drawTimeline() {
     node.style.width = `${Math.max((item.end - item.start) / duration * 100, 1)}%`;
     node.onpointerenter = () => node.classList.add("hovered");
     node.onpointerleave = () => node.classList.remove("hovered");
-    node.onclick = () => { state.selectedMosaic = item; state.tab = "motion"; render(); };
+    node.onclick = () => { state.selectedMosaic = item; state.selectedSticker = null; state.selectedZoom = null; state.tab = "motion"; render(); };
     lane.append(node);
   });
   if (!mosaics.length) {

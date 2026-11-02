@@ -50,15 +50,15 @@
 | G40 | 录制丢弃 / 停录决策 | discard + save&edit sheet | **已落地** live 丢弃 API + 停录决策岛 |
 | G41 | 标记列表面板 | Marker list seek/rename/delete | **已落地** 时间线 chip + 面板 |
 | G42 | 运镜焦点虚化 | FocusEffect radial | **已落地** 预览 radial blur/dim（导出滤镜后续） |
-| G43 | 贴纸完整 inspector | animation/exit/backdrop/边框阴影/层级 | **待办** 舞台拖拽已有；缺 Soft Silver 控件与导出 enter/exit |
-| G44 | 开场序列编排 | 元素 include / order / stagger | **待办** 模型有 `stagger`/`include_*`；UI 仅 preset/时长/曲线 |
-| G45 | 片段级音频覆写 | 选中 clip 的 system/mic 音量与静音 | **待办** 导出已读 `clip.audio`；检查器只做总线 |
+| G43 | 贴纸完整 inspector | animation/exit/backdrop/边框阴影/层级 | **部分** 宽度/旋转/透明/圆角/动画 + 删除；缺 backdrop/边框阴影/层级与导出 enter/exit |
+| G44 | 开场序列编排 | 元素 include / order / stagger | **部分** stagger + include_screen/camera/stickers；缺元素顺序拖拽 |
+| G45 | 片段级音频覆写 | 选中 clip 的 system/mic 音量与静音 | **已落地** `clip-audio` API + 声音检查器覆写 |
 | G46 | 导出音频-only / 选区 | ExportOutputKind + timeline range | **待办** sheet 仅分辨率+帧率，整段 MP4 |
 | G47 | 时间线多选 | ⇧/⌘ 选多个 primary clip | **待办** 单选；为批量删移与选区导出铺路 |
 | G48 | Q/W ripple trim + 效果剪贴板 | 修剪快捷键 / 属性粘贴 | **待办** trim API 已有；缺快捷键与 effect clipboard |
-| G49 | 录制暂停 / 继续 | pause + resume | **待办** live capsule 仅标记/丢弃/停止 |
-| G50 | 马赛克 inspector 补齐 | style / dimming / 几何 | **待办** 强度+舞台拖拽；缺 style/dimming 控件 |
-| G51 | 摄像头 PiP inspector 补齐 | border / opacity / roundness / shadow | **待办** 导出已合成；UI 缺几项旋钮 |
+| G49 | 录制暂停 / 继续 | pause + resume | **已落地** SIGSTOP/CONT + live capsule 暂停钮 |
+| G50 | 马赛克 inspector 补齐 | style / dimming / 几何 | **已落地** 柔化/突出 + 暗度/圆角/宽高；预览 spotlight |
+| G51 | 摄像头 PiP inspector 补齐 | border / opacity / roundness / shadow | **已落地** 圆角/描边/色/透明/阴影旋钮 |
 | G52 | 场景 / 样式预设 | 保存/套用 canvas+opening 包 | **待办** 无 preset store |
 
 ## P2+ 与原生毕业路径
@@ -70,7 +70,7 @@
 | Ubuntu Wayland 采集 | **xdg-desktop-portal + PipeWire**（已有）/ GTK4+GStreamer | 门户契合度最高 |
 | 指针轨迹 | **libinput** / portal remote desktop | 浏览器拿不到 CGEvent 级流 |
 
-**结论：** Web Soft Silver 已收齐本轮可复刻块（G09–G35、**G36–G38 输入源**、**G39–G42 倒计时/丢弃/标记列表/焦点虚化预览**）。首页录制岛为舞台主角；编辑器 docked chrome。下一优先 Web 批次：**G43 贴纸 inspector → G45 片段音频 → G51 摄像头 PiP 旋钮 → G50 马赛克补齐 → G49 录制暂停 → G44 开场编排 → G46/G47 导出选区与多选 → G48 快捷键**。线性 FocusEffect / 导出侧 blur、iPhone Continuity、Metal 预览不在 Web 桥范围。P0 预览真相源 / continuous / 浮动录制窗最优解仍是 **Qt6-QML-Vulkan**。
+**结论：** Web Soft Silver 已收齐本轮可复刻块（G09–G42、**G45/G49/G50/G51**，以及 G43/G44 部分）。首页录制岛为舞台主角；编辑器 docked chrome。下一优先：**G43 贴纸外观补齐 → G44 开场顺序 → G46/G47 导出选区与多选 → G48 快捷键 → G52 场景预设**。线性 FocusEffect / 导出侧 blur、iPhone Continuity、Metal 预览不在 Web 桥范围。P0 预览真相源 / continuous / 浮动录制窗最优解仍是 **Qt6-QML-Vulkan**。
 
 ## Oil Pro 视觉复拍（本轮）
 

@@ -55,15 +55,24 @@ class Recorder:
         self._socket_thread: threading.Thread | None = None
         self._stop_socket = threading.Event()
         self.error: str | None = None
+        self._paused = False
+        self._paused_at = 0.0
+        self._paused_total = 0.0
 
     def active(self) -> bool:
         return self._video is not None and self._video.poll() is None
 
     def status(self) -> dict:
+        # SIGSTOP keeps poll() as None, so paused captures still count as active.
         running = self.active()
-        elapsed = time.monotonic() - self._started if running else 0
+        if running:
+            now = self._paused_at if self._paused else time.monotonic()
+            elapsed = max(now - self._started - self._paused_total, 0)
+        else:
+            elapsed = 0
         return {
             "active": running,
+            "paused": bool(self._paused and running),
             "elapsed": round(elapsed, 3) if running else 0,
             "markers": len(self._markers),
             "backend": (self._spec or {}).get("backend"),
@@ -137,6 +146,9 @@ class Recorder:
             self._started = time.monotonic()
             self._directory = directory
             self._markers = []
+            self._paused = False
+            self._paused_at = 0.0
+            self._paused_total = 0.0
             self._spec = {
                 "id": project_id,
                 "backend": backend,
@@ -194,6 +206,40 @@ class Recorder:
         })
         return {"markers": len(self._markers)}
 
+
+    def pause(self) -> dict:
+        with self._lock:
+            if not self.active():
+                raise DogSCError("现在没有正在进行的录制。")
+            if self._paused:
+                return self.status()
+            for process in (self._video, self._audio, self._camera):
+                if process is not None and process.poll() is None:
+                    try:
+                        process.send_signal(signal.SIGSTOP)
+                    except OSError:
+                        pass
+            self._paused = True
+            self._paused_at = time.monotonic()
+            return self.status()
+
+    def resume(self) -> dict:
+        with self._lock:
+            if self._video is None:
+                raise DogSCError("现在没有正在进行的录制。")
+            if not self._paused:
+                return self.status()
+            self._paused_total += max(time.monotonic() - self._paused_at, 0)
+            self._paused = False
+            self._paused_at = 0.0
+            for process in (self._video, self._audio, self._camera):
+                if process is not None and process.poll() is None:
+                    try:
+                        process.send_signal(signal.SIGCONT)
+                    except OSError:
+                        pass
+            return self.status()
+
     def discard(self) -> dict:
         """Abort the active capture without creating a project (Apple discard path)."""
         with self._lock:
@@ -212,12 +258,18 @@ class Recorder:
             self._portal = None
             self._spec = None
             self._directory = None
+            self._paused = False
+            self._paused_at = 0.0
+            self._paused_total = 0.0
             self._close_socket()
             self._close_log()
+        _resume_if_stopped(video)
         _interrupt(video)
         if audio:
+            _resume_if_stopped(audio)
             _interrupt(audio)
         if camera:
+            _resume_if_stopped(camera)
             _interrupt(camera)
         if sampler:
             sampler.stop()
@@ -249,12 +301,18 @@ class Recorder:
             self._portal = None
             self._spec = None
             self._directory = None
+            self._paused = False
+            self._paused_at = 0.0
+            self._paused_total = 0.0
             self._close_socket()
             self._close_log()
+        _resume_if_stopped(video)
         _interrupt(video)
         if audio:
+            _resume_if_stopped(audio)
             _interrupt(audio)
         if camera:
+            _resume_if_stopped(camera)
             _interrupt(camera)
         events = sampler.stop() if sampler else []
         if portal:
@@ -337,11 +395,14 @@ class Recorder:
     def _command(self, backend: str, request: dict, desktop: Desktop, fps: int, audio: list[str], output: Path):
         source = str(request.get("source") or "display")
         if backend == "fixture":
-            duration = float(request.get("duration") or 1)
+            # duration<=0 keeps lavfi open until SIGINT so pause/resume can be tested.
+            duration = float(request.get("duration") if request.get("duration") is not None else 1)
+            video_src = "testsrc=size=640x360:rate=30" if duration <= 0 else f"testsrc=size=640x360:rate=30:duration={duration}"
+            audio_src = "sine=frequency=440" if duration <= 0 else f"sine=frequency=440:duration={duration}"
             command = [
                 "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                "-f", "lavfi", "-i", f"testsrc=size=640x360:rate=30:duration={duration}",
-                "-f", "lavfi", "-i", f"sine=frequency=440:duration={duration}",
+                "-f", "lavfi", "-i", video_src,
+                "-f", "lavfi", "-i", audio_src,
                 "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest",
                 str(output),
             ]
@@ -555,6 +616,15 @@ def send_mark(label: str = "") -> dict:
     if body.get("error"):
         raise DogSCError(str(body["error"]))
     return body
+
+
+def _resume_if_stopped(process: subprocess.Popen | None) -> None:
+    if process is None or process.poll() is not None:
+        return
+    try:
+        process.send_signal(signal.SIGCONT)
+    except OSError:
+        pass
 
 
 def _interrupt(process: subprocess.Popen) -> None:
