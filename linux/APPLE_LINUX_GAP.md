@@ -46,6 +46,10 @@
 | G36 | 摄像头主源 / 录屏 PiP 副轨 | AVCapture + Continuity Camera | **已落地** V4L2 枚举 + ffmpeg 主源/sidecar → `camera.mp4`；导出滤镜叠画中画 |
 | G37 | Android 手机屏幕 | （mac 无） | **已落地** scrcpy 优先 / adb screenrecord 回退 |
 | G38 | iPhone 有线屏幕 | Continuity / CMIO screen devices | **明示限制**：Linux 无 Continuity；UVC 出现时走摄像头；idevice 仅枚举提示 |
+| G39 | 录制倒计时 | Soft Silver countdown orb | **已落地** Off/3s/5s + 大号 orb |
+| G40 | 录制丢弃 / 停录决策 | discard + save&edit sheet | **已落地** live 丢弃 API + 停录决策岛 |
+| G41 | 标记列表面板 | Marker list seek/rename/delete | **已落地** 时间线 chip + 面板 |
+| G42 | 运镜焦点虚化 | FocusEffect radial | **已落地** 预览 radial blur/dim（导出滤镜后续） |
 
 ## P2+ 与原生毕业路径
 
@@ -56,7 +60,7 @@
 | Ubuntu Wayland 采集 | **xdg-desktop-portal + PipeWire**（已有）/ GTK4+GStreamer | 门户契合度最高 |
 | 指针轨迹 | **libinput** / portal remote desktop | 浏览器拿不到 CGEvent 级流 |
 
-**结论：** Web Soft Silver 已收齐可复刻 P1（含 G09/G13/G16/G17/G20 滞回、G23/G26、G28–G35、**G36–G38 输入源**）。首页录制岛为舞台主角；编辑器 docked chrome。输入源：显示器/窗口/区域 + **V4L2 摄像头**（主源或录屏 PiP）+ **Android scrcpy/adb**；iPhone Continuity 仍属 macOS。P0 预览真相源 / continuous / 浮动录制窗最优解仍是 **Qt6-QML-Vulkan**。
+**结论：** Web Soft Silver 已收齐可复刻 P1（含 G09/G13/G16/G17/G20 滞回、G23/G26、G28–G35、**G36–G38 输入源**、**G39–G42 倒计时/丢弃/标记列表/焦点虚化**）。首页录制岛为舞台主角；编辑器 docked chrome。输入源：显示器/窗口/区域 + **V4L2 摄像头**（主源或录屏 PiP）+ **Android scrcpy/adb**；iPhone Continuity 仍属 macOS。P0 预览真相源 / continuous / 浮动录制窗最优解仍是 **Qt6-QML-Vulkan**。录制 pause/resume、导出侧 FocusEffect、贴纸/开场完整 inspector 仍为后续。
 
 ## Oil Pro 视觉复拍（本轮）
 
@@ -64,4 +68,5 @@
 |---|---|
 | 首页（录制岛 hero） | `.oil-ui/soft-silver-gap/hero-home/` |
 | 编辑器（docked chrome） | `.oil-ui/soft-silver-gap/hero-editor/` |
+| Apple parity 基线 | `.oil-ui/apple-parity/` |
 | 诊断 | `.oil-ui/soft-silver-gap/diagnosis.md` |

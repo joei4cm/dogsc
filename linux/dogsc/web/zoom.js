@@ -118,5 +118,5 @@
     return null;
   }
 
-  return { clamp, ease, layout, absoluteZooms, sample, viewport, sampleViewport, duration, locateTimeline, clipDuration };
+  return { clamp, ease, layout, absoluteZooms, progressAt, sample, viewport, sampleViewport, duration, locateTimeline, clipDuration };
 });

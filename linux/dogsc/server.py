@@ -143,6 +143,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(APP.recorder.start(self._body()))
             if path == "/api/record/stop":
                 return self._json(APP.recorder.stop())
+            if path == "/api/record/discard":
+                return self._json(APP.recorder.discard())
             if path == "/api/record/marker":
                 body = self._body()
                 return self._json(APP.recorder.mark(str(body.get("label") or "")))
@@ -728,6 +730,23 @@ def _merge_opening(opening: dict, incoming: dict) -> dict:
     return opening
 
 
+def _clamp01(value: float) -> float:
+    return min(max(float(value), 0), 1)
+
+
+def _normalize_focus_effect(value) -> dict | None:
+    if value is None or value is False:
+        return None
+    if not isinstance(value, dict):
+        raise DogSCError("焦点虚化参数不正确。")
+    return {
+        "size": min(max(float(value.get("size", 0.45)), 0.1), 1),
+        "blur": _clamp01(value.get("blur", 0.35)),
+        "softness": _clamp01(value.get("softness", 0.5)),
+        "dimming": _clamp01(value.get("dimming", 0.18)),
+    }
+
+
 def _update_zoom(project: dict, body: dict) -> None:
     zoom_id = str(body.get("id") or "")
     for zoom in project["zooms"]:
@@ -749,6 +768,12 @@ def _update_zoom(project: dict, body: dict) -> None:
             zoom["start"] = max(float(body["start"]), 0)
         if "end" in body:
             zoom["end"] = max(float(body["end"]), float(zoom["start"]))
+        if "focus_effect" in body:
+            effect = _normalize_focus_effect(body.get("focus_effect"))
+            if effect is None:
+                zoom.pop("focus_effect", None)
+            else:
+                zoom["focus_effect"] = effect
         return
     raise DogSCError("找不到这段运镜。")
 

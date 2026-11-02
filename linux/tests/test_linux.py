@@ -358,6 +358,62 @@ class RecorderTests(unittest.TestCase):
             self.assertGreater(project["media"]["duration"], 0.3)
             self.assertTrue((Path(temporary) / "home" / "projects" / project["id"] / "media.mp4").exists())
 
+    def test_discard_aborts_without_project(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home"
+            os.environ["DOGSC_HOME"] = str(home)
+            recorder = Recorder()
+            status = recorder.start({"backend": "fixture", "duration": 0.4, "fps": 30})
+            project_id = status["id"]
+            target = home / "projects" / project_id
+            self.assertTrue(target.exists())
+            payload = recorder.discard()
+            self.assertTrue(payload["discarded"])
+            self.assertFalse(recorder.active())
+            self.assertFalse(target.exists())
+            with self.assertRaises(Exception):
+                recorder.stop()
+
+
+class FocusEffectApiTests(unittest.TestCase):
+    def test_zoom_focus_effect_roundtrip(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            os.environ["DOGSC_HOME"] = str(Path(temporary) / "home")
+            project = create_demo()
+            zoom = project["zooms"][0]
+            server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                port = server.server_address[1]
+                body = json.dumps({
+                    "id": zoom["id"],
+                    "focus_effect": {"size": 0.4, "blur": 0.5, "softness": 0.6, "dimming": 0.2},
+                }).encode()
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/api/projects/{project['id']}/zoom-update",
+                    data=body,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                updated = json.load(urllib.request.urlopen(request, timeout=5))
+                effect = next(item for item in updated["zooms"] if item["id"] == zoom["id"])["focus_effect"]
+                self.assertEqual(effect["size"], 0.4)
+                self.assertEqual(effect["blur"], 0.5)
+                clear = json.dumps({"id": zoom["id"], "focus_effect": None}).encode()
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/api/projects/{project['id']}/zoom-update",
+                    data=clear,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                cleared = json.load(urllib.request.urlopen(request, timeout=5))
+                self.assertNotIn("focus_effect", next(item for item in cleared["zooms"] if item["id"] == zoom["id"]))
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
 
 if __name__ == "__main__":
     unittest.main()

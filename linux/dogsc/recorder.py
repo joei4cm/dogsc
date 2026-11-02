@@ -194,6 +194,42 @@ class Recorder:
         })
         return {"markers": len(self._markers)}
 
+    def discard(self) -> dict:
+        """Abort the active capture without creating a project (Apple discard path)."""
+        with self._lock:
+            if self._video is None or self._directory is None:
+                raise DogSCError("现在没有正在进行的录制。")
+            directory = self._directory
+            video = self._video
+            audio = self._audio
+            camera = self._camera
+            sampler = self._sampler
+            portal = self._portal
+            self._video = None
+            self._audio = None
+            self._camera = None
+            self._sampler = None
+            self._portal = None
+            self._spec = None
+            self._directory = None
+            self._close_socket()
+            self._close_log()
+        _interrupt(video)
+        if audio:
+            _interrupt(audio)
+        if camera:
+            _interrupt(camera)
+        if sampler:
+            sampler.stop()
+        if portal:
+            portal.close()
+        try:
+            import shutil
+            shutil.rmtree(directory, ignore_errors=True)
+        except OSError:
+            pass
+        return {"ok": True, "discarded": True}
+
     def stop(self) -> dict:
         with self._lock:
             if self._video is None or self._directory is None or self._spec is None:

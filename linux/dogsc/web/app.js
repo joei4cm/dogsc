@@ -29,9 +29,13 @@ const state = {
     cameraDevice: null,
     phoneId: null,
     phonePlatform: null,
+    countdown: Number(localStorage.getItem("dogsc-countdown") || 3),
   },
   sources: { displays: [], windows: [], cameras: [], phones: [], capabilities: {} },
   recording: { active: false, elapsed: 0 },
+  countdown: null,
+  recordDecision: null,
+  markerList: false,
   recorderPopover: null,
   hudMenu: null,
   cropping: false,
@@ -254,6 +258,20 @@ const STR = {
     start: "开始",
     stop: "停止并剪辑",
     marker: "标记",
+    markers: "录制标记",
+    markersHint: "快速找回重点与重录位置",
+    markersEmpty: "还没有标记。录制中或时间线上可添加。",
+    markersFooter: "点击定位 · 双击改名 · Delete 删除",
+    discard: "丢弃",
+    saveEdit: "保存并剪辑",
+    recordDone: "录制完成",
+    recordDoneLead: "要打开 Soft Silver 时间线，还是丢掉这段？",
+    countdown: "倒计时",
+    focusEffect: "焦点虚化",
+    focusSize: "清晰范围",
+    focusBlur: "模糊程度",
+    focusSoftness: "羽化",
+    focusDim: "暗角",
     back: "项目",
     split: "分割",
     auto: "按点击生成运镜",
@@ -349,6 +367,20 @@ const STR = {
     start: "Start",
     stop: "Stop and edit",
     marker: "Marker",
+    markers: "Markers",
+    markersHint: "Jump back to key moments",
+    markersEmpty: "No markers yet. Add one while recording or on the timeline.",
+    markersFooter: "Click to seek · Double-click to rename · Delete to remove",
+    discard: "Discard",
+    saveEdit: "Save & edit",
+    recordDone: "Recording finished",
+    recordDoneLead: "Open the Soft Silver timeline, or discard this take?",
+    countdown: "Countdown",
+    focusEffect: "Focus blur",
+    focusSize: "Clear size",
+    focusBlur: "Blur",
+    focusSoftness: "Softness",
+    focusDim: "Dimming",
     back: "Projects",
     split: "Split",
     auto: "Zoom from clicks",
@@ -497,6 +529,13 @@ function closeFloatingUI() {
   if (state.recorderPopover) { state.recorderPopover = null; changed = true; }
   if (state.hudMenu) { state.hudMenu = null; changed = true; }
   if (state.trackMenu) { state.trackMenu = false; changed = true; }
+  if (state.markerList) { state.markerList = false; changed = true; }
+  if (state.countdown != null) {
+    clearCountdown();
+    countdownToken += 1;
+    state.countdown = null;
+    changed = true;
+  }
   if (state.exportSheet && state.exportSheet.state !== "running") {
     state.exportSheet = null;
     changed = true;
@@ -656,11 +695,29 @@ function parityNoteHtml() {
 function recorderCapsuleHtml() {
   const source = state.record.source;
   const live = state.recording.active;
+  if (state.countdown != null) {
+    return `<div class="recorder-dock">
+      <div class="countdown-orb" aria-live="polite">${state.countdown}</div>
+    </div>`;
+  }
+  if (state.recordDecision) {
+    return `<div class="recorder-dock">
+      <aside class="record-decision island" role="dialog" aria-label="${t("recordDone")}">
+        <strong>${t("recordDone")}</strong>
+        <p>${t("recordDoneLead")}</p>
+        <div class="record-decision-actions">
+          <button class="btn ghost" id="discard-record">${t("discard")}</button>
+          <button class="btn primary" id="save-record">${t("saveEdit")}</button>
+        </div>
+      </aside>
+    </div>`;
+  }
   if (live) {
     return `<div class="recorder-dock">
       <div class="recorder-capsule is-live" data-mode="live">
         <div class="recording-timer" id="elapsed">${formatTime(state.recording.elapsed)}</div>
         <button class="rec-toggle" id="add-marker" title="${t("marker")}">${ICONS.marker}</button>
+        <button class="rec-toggle danger-quiet" id="discard-live" title="${t("discard")}">${ICONS.trash}</button>
         <button class="record-go live" id="stop-record" title="${t("stop")}"><span class="dot"><i></i></span></button>
       </div>
     </div>`;
@@ -732,6 +789,13 @@ function recorderCapsuleHtml() {
       <div class="section-title">${t("settings")}</div>
       <label class="field">${t("fps")}
         <select id="fps"><option ${state.record.fps === 30 ? "selected" : ""}>30</option><option ${state.record.fps === 60 ? "selected" : ""}>60</option></select>
+      </label>
+      <label class="field">${t("countdown")}
+        <select id="countdown-sel">
+          <option value="0" ${Number(state.record.countdown) === 0 ? "selected" : ""}>${state.lang === "zh" ? "关" : "Off"}</option>
+          <option value="3" ${Number(state.record.countdown) === 3 ? "selected" : ""}>3s</option>
+          <option value="5" ${Number(state.record.countdown) === 5 ? "selected" : ""}>5s</option>
+        </select>
       </label>
       <div class="actions" style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
         <button class="btn" id="go-demo">${t("demo")}</button>
@@ -863,6 +927,39 @@ function stageHudHtml(project) {
   </div>`;
 }
 
+function markerAbsoluteTime(marker) {
+  const rows = Z.layout(state.project?.clips || []);
+  const row = rows.find((item) => item.id === marker.clip_id);
+  if (!row) return Number(marker.local || 0);
+  return row.start + Number(marker.local || 0);
+}
+
+function markerListHtml() {
+  const markers = [...(state.project?.markers || [])].sort((a, b) => markerAbsoluteTime(a) - markerAbsoluteTime(b));
+  const rows = markers.map((marker) => {
+    const abs = markerAbsoluteTime(marker);
+    return `<button type="button" class="marker-row ${state.selectedMarker === marker.id ? "active" : ""}" data-marker-seek="${escapeHtml(marker.id)}">
+      <span class="marker-row-copy">
+        <strong>${escapeHtml(marker.label || t("marker"))}</strong>
+        <em>${formatTime(abs)}</em>
+      </span>
+      <span class="marker-row-del" data-marker-del="${escapeHtml(marker.id)}" title="${t("delete")}">${ICONS.trash}</span>
+    </button>`;
+  }).join("");
+  return `<div class="marker-list island" id="marker-list" role="dialog" aria-label="${t("markers")}">
+    <div class="marker-list-head">
+      <div>
+        <strong>${t("markers")}</strong>
+        <em>${markers.length}</em>
+        <p>${t("markersHint")}</p>
+      </div>
+      <button type="button" class="tl-tool" id="marker-list-close" aria-label="${state.lang === "zh" ? "关闭" : "Close"}">×</button>
+    </div>
+    <div class="marker-list-body">${rows || `<p class="note">${t("markersEmpty")}</p>`}</div>
+    <div class="marker-list-foot">${t("markersFooter")}</div>
+  </div>`;
+}
+
 function timelineBarHtml() {
   const tracks = state.trackVisibility;
   const trackMenu = state.trackMenu ? `<div class="track-menu island" id="track-menu" role="menu">
@@ -871,11 +968,18 @@ function timelineBarHtml() {
       <button type="button" data-track="mosaic" aria-pressed="${tracks.mosaic !== false}"><span>${t("trackMosaic")}</span><em>${tracks.mosaic !== false ? "●" : "○"}</em></button>
       <button type="button" data-track="sticker" aria-pressed="${tracks.sticker !== false}"><span>${t("trackSticker")}</span><em>${tracks.sticker !== false ? "●" : "○"}</em></button>
     </div>` : "";
+  const markerMenu = state.markerList ? markerListHtml() : "";
   return `<div class="timeline-bar">
     <button class="tl-tool" id="split" title="${t("split")} · ${shortcutHint("split")}">${ICONS.scissors}</button>
     <button class="tl-tool" id="delete-selection" title="${t("delete")} · Delete">${ICONS.trash}</button>
     <button class="tl-tool" id="restore-cuts" title="${t("restoreCuts")}">${ICONS.restore}</button>
     <button class="tl-tool" id="add-edit-marker" title="${t("marker")}">${ICONS.marker}</button>
+    <div class="tl-markers">
+      <button class="tl-tool marker-chip ${state.markerList ? "active" : ""}" id="marker-list-btn" title="${t("markers")}" aria-expanded="${state.markerList}">
+        ${ICONS.marker}<span>${t("markers")}</span><em>${(state.project?.markers || []).length}</em>
+      </button>
+      ${markerMenu}
+    </div>
     <div class="tl-group" style="margin-left:8px">
       <button id="mode-picture" class="${state.timelineMode === "picture" ? "active" : ""}">${ICONS.film}${t("picture")}</button>
       <button id="mode-wave" class="${state.timelineMode === "waveform" ? "active" : ""}">${ICONS.wave}${t("waveform")}</button>
@@ -1088,6 +1192,26 @@ function openingInspector() {
     <label class="field">节奏<select id="opening-curve">${options(["smooth","swift","gentle"], opening.curve || "smooth", { smooth: "平滑", swift: "利落", gentle: "柔和" })}</select></label>`;
 }
 
+function defaultFocusEffect() {
+  return { size: 0.45, blur: 0.35, softness: 0.5, dimming: 0.18 };
+}
+
+function focusEffectInspectorHtml(selected) {
+  const effect = selected.focus_effect;
+  const on = !!effect;
+  const values = effect || defaultFocusEffect();
+  return `
+    <div class="section" style="margin-top:12px">
+      <label class="row"><input id="focus-effect-on" type="checkbox" ${on ? "checked" : ""}> ${t("focusEffect")}</label>
+      ${on ? `
+        <label class="field">${fieldValue(t("focusSize"), `${Math.round(values.size * 100)}%`)}<input id="focus-size" type="range" min="0.1" max="1" step="0.01" value="${values.size}"></label>
+        <label class="field">${fieldValue(t("focusBlur"), `${Math.round(values.blur * 100)}%`)}<input id="focus-blur" type="range" min="0" max="1" step="0.01" value="${values.blur}"></label>
+        <label class="field">${fieldValue(t("focusSoftness"), `${Math.round(values.softness * 100)}%`)}<input id="focus-soft" type="range" min="0" max="1" step="0.01" value="${values.softness}"></label>
+        <label class="field">${fieldValue(t("focusDim"), `${Math.round(values.dimming * 100)}%`)}<input id="focus-dim" type="range" min="0" max="1" step="0.01" value="${values.dimming}"></label>
+      ` : ""}
+    </div>`;
+}
+
 function motionInspector() {
   const selected = state.project.zooms.find((zoom) => zoom.id === state.selectedZoom);
   const motion = state.project.screen_motions?.find((item) => item.id === state.selectedMotion);
@@ -1117,6 +1241,7 @@ function motionInspector() {
         <span>X ${Math.round(Number(selected.focus_x ?? 0.5) * 100)}%</span>
         <span>Y ${Math.round(Number(selected.focus_y ?? 0.5) * 100)}%</span>
       </div>
+      ${focusEffectInspectorHtml(selected)}
       ${envelopeHtml(selected.easing || "cubic")}
       <div class="dial-row">
         ${dialHtml(zh ? "放大" : "Zoom", `${Number(selected.scale).toFixed(2)}x`, (Number(selected.scale) - 1) / 3)}
@@ -1328,10 +1453,20 @@ function bindHome() {
   });
   document.querySelector("#start-record")?.addEventListener("click", (event) => {
     DogSCMotion.press(event.currentTarget);
-    startRecording();
+    beginRecording();
   });
   document.querySelector("#stop-record")?.addEventListener("click", stopRecording);
+  document.querySelector("#discard-live")?.addEventListener("click", discardLiveRecording);
+  document.querySelector("#discard-record")?.addEventListener("click", discardRecordDecision);
+  document.querySelector("#save-record")?.addEventListener("click", saveRecordDecision);
   document.querySelector("#add-marker")?.addEventListener("click", () => api("/api/record/marker", { method: "POST", body: {} }).catch((error) => toast(error.message)));
+  const countdownSel = document.querySelector("#countdown-sel");
+  if (countdownSel) {
+    countdownSel.onchange = () => {
+      state.record.countdown = Number(countdownSel.value);
+      localStorage.setItem("dogsc-countdown", String(state.record.countdown));
+    };
+  }
   const pop = document.querySelector("#rec-pop");
   if (pop) {
     pop.style.transition = DogSCMotion.cssTransition("morph");
@@ -1478,6 +1613,65 @@ function bind() {
   document.querySelector("#add-tilt")?.addEventListener("click", () => mutate(`/api/projects/${state.project.id}/screen-motion`, { time: state.time, rotation_x: 12, rotation_y: -10 }));
   document.querySelector("#add-mosaic")?.addEventListener("click", () => { state.hudMenu = null; mutate(`/api/projects/${state.project.id}/mosaic`, { time: state.time }); });
   document.querySelector("#add-edit-marker")?.addEventListener("click", () => mutate(`/api/projects/${state.project.id}/marker`, { time: state.time }));
+  document.querySelector("#marker-list-btn")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    state.markerList = !state.markerList;
+    state.trackMenu = false;
+    render();
+  });
+  document.querySelector("#marker-list-close")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    state.markerList = false;
+    render();
+  });
+  document.querySelectorAll("[data-marker-seek]").forEach((node) => {
+    node.addEventListener("click", (event) => {
+      if (event.target.closest("[data-marker-del]")) return;
+      const marker = (state.project.markers || []).find((item) => item.id === node.dataset.markerSeek);
+      if (!marker) return;
+      state.selectedMarker = marker.id;
+      state.playing = false;
+      state.time = markerAbsoluteTime(marker);
+      updatePlayButton();
+      paintCanvas();
+      drawTimeline();
+    });
+    node.addEventListener("dblclick", async (event) => {
+      event.preventDefault();
+      const marker = (state.project.markers || []).find((item) => item.id === node.dataset.markerSeek);
+      if (!marker) return;
+      const label = prompt(state.lang === "zh" ? "标记名称" : "Marker label", marker.label || "");
+      if (label == null) return;
+      try {
+        state.project = await api(`/api/projects/${state.project.id}/marker-update`, {
+          method: "POST",
+          body: { id: marker.id, label },
+        });
+        render();
+      } catch (error) { toast(error.message); }
+    });
+  });
+  document.querySelectorAll("[data-marker-del]").forEach((node) => {
+    node.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      try {
+        state.project = await api(`/api/projects/${state.project.id}/marker-delete`, {
+          method: "POST",
+          body: { id: node.dataset.markerDel },
+        });
+        if (state.selectedMarker === node.dataset.markerDel) state.selectedMarker = null;
+        render();
+      } catch (error) { toast(error.message); }
+    });
+  });
+  if (state.markerList) {
+    document.addEventListener("pointerdown", (event) => {
+      if (event.target.closest("#marker-list, #marker-list-btn")) return;
+      if (!state.markerList) return;
+      state.markerList = false;
+      render();
+    }, { once: true });
+  }
   document.querySelector("#sticker-file")?.addEventListener("change", async (event) => {
     const data = new FormData();
     data.append("file", event.target.files[0]);
@@ -1637,6 +1831,11 @@ function bindInspectorFields() {
     ["#zoom-enter", (v) => updateZoom({ enter: Number(v) })],
     ["#zoom-exit", (v) => updateZoom({ exit: Number(v) })],
     ["#easing", (v) => updateZoom({ easing: v })],
+    ["#focus-effect-on", (v, el) => updateZoom({ focus_effect: el.checked ? defaultFocusEffect() : null }), "change"],
+    ["#focus-size", (v) => patchFocusEffect({ size: Number(v) })],
+    ["#focus-blur", (v) => patchFocusEffect({ blur: Number(v) })],
+    ["#focus-soft", (v) => patchFocusEffect({ softness: Number(v) })],
+    ["#focus-dim", (v) => patchFocusEffect({ dimming: Number(v) })],
     ["#rotation-z", (v) => updateMotion({ rotation_z: Number(v) })],
     ["#perspective", (v) => updateMotion({ perspective: Number(v) })],
     ["#motion-scale", (v) => updateMotion({ scale: Number(v) })],
@@ -1715,6 +1914,93 @@ async function meta(body) {
 async function updateZoom(body) {
   if (!state.selectedZoom) return;
   await mutate(`/api/projects/${state.project.id}/zoom-update`, { id: state.selectedZoom, ...body });
+}
+
+async function patchFocusEffect(patch) {
+  const selected = state.project?.zooms?.find((zoom) => zoom.id === state.selectedZoom);
+  if (!selected?.focus_effect) return;
+  await updateZoom({ focus_effect: { ...selected.focus_effect, ...patch } });
+}
+
+let countdownTimer = null;
+let countdownToken = 0;
+
+function clearCountdown() {
+  if (countdownTimer) {
+    clearTimeout(countdownTimer);
+    countdownTimer = null;
+  }
+}
+
+async function beginRecording() {
+  if (state.countdown != null || state.recording.active || state.recordDecision) return;
+  const seconds = Math.max(0, Number(state.record.countdown) || 0);
+  if (seconds <= 0) {
+    await startRecording();
+    return;
+  }
+  const token = ++countdownToken;
+  state.recorderPopover = null;
+  state.countdown = seconds;
+  render();
+  const tick = () => {
+    if (token !== countdownToken) return;
+    if (state.countdown == null) return;
+    if (state.countdown <= 1) {
+      state.countdown = null;
+      startRecording();
+      return;
+    }
+    state.countdown -= 1;
+    const orb = document.querySelector(".countdown-orb");
+    if (orb) {
+      orb.textContent = String(state.countdown);
+      orb.classList.remove("pulse");
+      void orb.offsetWidth;
+      orb.classList.add("pulse");
+    } else {
+      render();
+    }
+    countdownTimer = setTimeout(tick, 1000);
+  };
+  countdownTimer = setTimeout(tick, 1000);
+}
+
+async function discardLiveRecording() {
+  clearCountdown();
+  countdownToken += 1;
+  state.countdown = null;
+  try {
+    await api("/api/record/discard", { method: "POST", body: {} });
+    state.recording = { active: false, elapsed: 0 };
+    state.recordDecision = null;
+    toast(state.lang === "zh" ? "已丢弃本次录制" : "Take discarded");
+    render();
+  } catch (error) { toast(error.message); }
+}
+
+async function discardRecordDecision() {
+  const decision = state.recordDecision;
+  if (!decision?.id) {
+    state.recordDecision = null;
+    render();
+    return;
+  }
+  try {
+    await api(`/api/projects/${decision.id}`, { method: "DELETE" });
+    state.recordDecision = null;
+    state.recording = { active: false, elapsed: 0 };
+    state.projects = await api("/api/projects");
+    toast(state.lang === "zh" ? "已丢弃本次录制" : "Take discarded");
+    render();
+  } catch (error) { toast(error.message); }
+}
+
+async function saveRecordDecision() {
+  const decision = state.recordDecision;
+  if (!decision?.id) return;
+  state.recordDecision = null;
+  await openProject(decision.id);
 }
 async function updateMotion(body) {
   if (!state.selectedMotion) return;
@@ -1798,6 +2084,8 @@ async function startRecording() {
       state.record.cameraDevice = state.sources.cameras?.[0]?.id || null;
     }
     state.recorderPopover = null;
+    state.countdown = null;
+    state.recordDecision = null;
     state.recording = await api("/api/record/start", { method: "POST", body: {
       source: state.record.source,
       display_index: state.record.display,
@@ -1814,11 +2102,16 @@ async function startRecording() {
     state.view = "home";
     render();
     pollRecording();
-  } catch (error) { toast(error.message); }
+  } catch (error) {
+    state.countdown = null;
+    render();
+    toast(error.message);
+  }
 }
 
 async function pollRecording() {
   if (state.view !== "home" && state.view !== "record") return;
+  if (state.recordDecision || state.countdown != null) return;
   try { state.recording = await api("/api/record"); } catch (error) { return; }
   const elapsed = document.querySelector("#elapsed");
   if (elapsed) elapsed.textContent = formatTime(state.recording.elapsed || 0);
@@ -1830,7 +2123,9 @@ async function stopRecording() {
   try {
     const project = await api("/api/record/stop", { method: "POST", body: {} });
     state.recording = { active: false, elapsed: 0 };
-    await openProject(project.id);
+    state.recordDecision = project;
+    state.projects = await api("/api/projects");
+    render();
   } catch (error) { toast(error.message); }
 }
 
@@ -2002,6 +2297,56 @@ function placeFocusDot(view) {
   focus.style.top = `${((fy - view.top) / view.size) * 100}%`;
 }
 
+function paintFocusEffectOverlay(parts) {
+  const zooms = Z.absoluteZooms ? Z.absoluteZooms(state.project.clips, state.project.zooms) : null;
+  const abs = zooms || (state.project.zooms || []).map((zoom) => {
+    const rows = Z.layout(state.project.clips);
+    const row = rows.find((entry) => entry.id === zoom.clip_id);
+    if (!row) return null;
+    return { ...zoom, start: row.start + Number(zoom.start || 0), end: row.start + Number(zoom.end || 0) };
+  }).filter(Boolean);
+  let active = null;
+  let amount = 0;
+  for (const zoom of abs) {
+    if (!zoom.focus_effect) continue;
+    const progress = typeof Z.progressAt === "function"
+      ? Z.progressAt(zoom, state.time)
+      : (() => {
+          const start = Number(zoom.start);
+          const end = Number(zoom.end);
+          const enter = Math.max(Number(zoom.enter || 0), 0);
+          const exit = Math.max(Number(zoom.exit || 0), 0);
+          if (state.time < start || state.time > end + exit) return 0;
+          if (enter > 0.001 && state.time < start + enter) return (state.time - start) / enter;
+          if (state.time <= end) return 1;
+          if (exit > 0.001) return 1 - (state.time - end) / exit;
+          return 0;
+        })();
+    if (progress <= 0) continue;
+    if (!active || Number(zoom.start) >= Number(active.start)) {
+      active = zoom;
+      amount = progress;
+    }
+  }
+  if (!active || amount <= 0) return;
+  const effect = active.focus_effect;
+  const size = Z.clamp(Number(effect.size ?? 0.45), 0.1, 1);
+  const blur = Z.clamp(Number(effect.blur ?? 0.35), 0, 1);
+  const softness = Z.clamp(Number(effect.softness ?? 0.5), 0, 1);
+  const dimming = Z.clamp(Number(effect.dimming ?? 0.18), 0, 1) * amount;
+  const clear = size * 50;
+  const feather = Math.max(clear * softness * 0.55, 4);
+  const fx = Number(active.focus_x ?? 0.5) * 100;
+  const fy = Number(active.focus_y ?? 0.5) * 100;
+  const blurPx = (4 + blur * 22 * amount).toFixed(1);
+  const mask = `radial-gradient(circle at ${fx}% ${fy}%, transparent ${Math.max(clear - feather, 0)}%, rgba(0,0,0,0.92) ${clear + feather}%)`;
+  parts.push(
+    `<div class="overlay-focus" aria-hidden="true" style="`
+    + `--focus-blur:${blurPx}px;--focus-dim:${dimming.toFixed(3)};`
+    + `-webkit-mask-image:${mask};mask-image:${mask}"></div>`
+  );
+}
+
 function paintStageOverlays() {
   const host = document.querySelector("#overlays");
   if (!host || !state.project || state.cropping) {
@@ -2009,6 +2354,7 @@ function paintStageOverlays() {
     return;
   }
   const parts = [];
+  paintFocusEffectOverlay(parts);
   for (const item of (state.project.mosaics || []).map(absoluteItem)) {
     if (state.time < item.start || state.time > item.end) continue;
     const intensity = Number(item.intensity || 0.55);
