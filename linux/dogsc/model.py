@@ -20,7 +20,7 @@ ASPECTS = (
 RESOLUTIONS = ("source", "1080p", "1440p", "4k")
 EASINGS = ("linear", "quadratic", "cubic", "quintic", "spring")
 FRAME_STYLES = ("none", "windowLight", "windowDark", "browserLight", "browserDark", "devicePhone")
-BACKGROUND_KINDS = ("solid", "pattern", "dynamic")
+BACKGROUND_KINDS = ("solid", "pattern", "dynamic", "image")
 PATTERN_PRESETS = (
     "obsidianGrid",
     "engineeringWhiteGrid",
@@ -45,6 +45,21 @@ MOSAIC_STYLES = ("blur", "spotlight")
 CAMERA_SHAPES = ("square", "horizontal", "vertical", "original", "circle")
 
 
+def blank_crop() -> dict:
+    """Normalized source crop — mirrors RecorderCore.NormalizedCrop."""
+    return {"x": 0.0, "y": 0.0, "width": 1.0, "height": 1.0}
+
+
+def clamp_crop(crop: dict | None, minimum: float = 0.02) -> dict:
+    value = {**blank_crop(), **(crop or {})}
+    floor = min(max(float(minimum), 0.001), 1.0)
+    x = min(max(float(value.get("x") or 0), 0.0), 1.0 - floor)
+    y = min(max(float(value.get("y") or 0), 0.0), 1.0 - floor)
+    width = min(max(float(value.get("width") or 1), floor), 1.0 - x)
+    height = min(max(float(value.get("height") or 1), floor), 1.0 - y)
+    return {"x": x, "y": y, "width": width, "height": height}
+
+
 def blank_canvas() -> dict:
     return {
         "aspect": "16:9",
@@ -56,6 +71,7 @@ def blank_canvas() -> dict:
         "border_opacity": 0.18,
         "background_kind": "solid",
         "background": "#16161a",
+        "background_image": None,
         "pattern": "obsidianGrid",
         "pattern_scale": 1.0,
         "pattern_opacity": 1.0,
@@ -64,6 +80,7 @@ def blank_canvas() -> dict:
         "content_scale": 1.0,
         "content_x": 0.5,
         "content_y": 0.5,
+        "crop": blank_crop(),
         "screen_frame": "none",
         "frame_scale": 1.0,
         "toolbar_scale": 1.0,
@@ -198,6 +215,7 @@ def migrate(project: dict) -> dict:
     canvas.update(project.get("canvas") or {})
     if "background_kind" not in canvas:
         canvas["background_kind"] = "solid"
+    canvas["crop"] = clamp_crop(canvas.get("crop"))
     project["canvas"] = canvas
     project["cursor"] = {**blank_cursor(), **(project.get("cursor") or {})}
     if project.get("draw_cursor") is False:
@@ -210,6 +228,7 @@ def migrate(project: dict) -> dict:
     project.setdefault("stickers", [])
     project.setdefault("history", [])
     project.setdefault("history_index", -1)
+    project.setdefault("deleted_clips", [])
     clips = []
     for clip in project.get("clips") or []:
         row = dict(clip)

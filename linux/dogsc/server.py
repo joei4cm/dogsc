@@ -11,8 +11,8 @@ import threading
 import webbrowser
 
 from dogsc.errors import DogSCError
-from dogsc.export_plan import build_export
-from dogsc.media import probe
+from dogsc.export_plan import build_export, estimate_export
+from dogsc.media import audio_peaks, probe, thumb_at
 from dogsc.model import (
     ASPECTS,
     BACKGROUND_KINDS,
@@ -30,8 +30,10 @@ from dogsc.model import (
     blank_mosaic,
     blank_screen_motion,
     blank_sticker,
+    clamp_crop,
     migrate,
 )
+from dogsc.wallpapers import list_wallpapers, resolve_wallpaper
 from dogsc.platform import detect
 from dogsc.project import (
     assets_dir,
@@ -91,6 +93,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(list_projects())
             if path == "/api/record":
                 return self._json(APP.recorder.status())
+            if path == "/api/wallpapers":
+                return self._json({"items": list_wallpapers()})
+            if path.startswith("/api/wallpapers/"):
+                key = path.split("/api/wallpapers/", 1)[1]
+                target = resolve_wallpaper(key)
+                if target is None:
+                    return self._error(404, "没有这张壁纸。")
+                return self._file(target, mimetypes.guess_type(target.name)[0] or "image/jpeg")
             if path.startswith("/api/projects/"):
                 return self._project_get(path)
             if path == "/" or path == "":
@@ -185,12 +195,33 @@ class Handler(BaseHTTPRequestHandler):
             if not target.is_file():
                 return self._error(404, "没有这张缩略图。")
             return self._file(target, "image/jpeg")
+        if tail == "thumb":
+            query = urlparse(self.path).query
+            params = dict(part.split("=", 1) for part in query.split("&") if "=" in part)
+            try:
+                source_time = float(unquote(params.get("t", "0")))
+            except ValueError:
+                source_time = 0.0
+            target = thumb_at(
+                media_path(project_id),
+                project_dir(project_id) / "thumbs" / "timed",
+                source_time,
+            )
+            if target is None:
+                return self._error(404, "没有这张缩略图。")
+            return self._file(target, "image/jpeg")
+        if tail == "peaks":
+            peaks = audio_peaks(media_path(project_id), buckets=240)
+            return self._json({"peaks": peaks})
         if tail.startswith("assets/"):
             name = Path(tail.split("/", 1)[1]).name
             target = assets_dir(project_id) / name
             if not target.is_file():
                 return self._error(404, "没有这个素材。")
             return self._file(target, mimetypes.guess_type(target.name)[0] or "application/octet-stream")
+        if tail == "export/estimate":
+            project = migrate(load(project_id))
+            return self._json(estimate_export(project, media_path(project_id)))
         if tail == "export/status":
             return self._json(APP.exports.get(project_id) or {"state": "idle"})
         if tail == "export/file":
@@ -223,9 +254,51 @@ class Handler(BaseHTTPRequestHandler):
                 project["clips"], project["zooms"], project["markers"], float(body["time"])
             )
         elif action == "delete-clip":
+            clip_id = str(body["id"])
+            removed = next((clip for clip in project["clips"] if clip["id"] == clip_id), None)
+            if removed is not None:
+                bag = {
+                    "clip": removed,
+                    "zooms": [zoom for zoom in project["zooms"] if zoom.get("clip_id") == clip_id],
+                    "markers": [marker for marker in project["markers"] if marker.get("clip_id") == clip_id],
+                    "index": next((index for index, clip in enumerate(project["clips"]) if clip["id"] == clip_id), len(project["clips"])),
+                }
+                deleted = list(project.get("deleted_clips") or [])
+                deleted.append(bag)
+                project["deleted_clips"] = deleted[-20:]
             project["clips"], project["zooms"], project["markers"] = delete_clip(
-                project["clips"], project["zooms"], project["markers"], str(body["id"])
+                project["clips"], project["zooms"], project["markers"], clip_id
             )
+        elif action == "restore-clip":
+            deleted = list(project.get("deleted_clips") or [])
+            if not deleted:
+                raise DogSCError("没有可恢复的剪辑。")
+            bag = deleted.pop()
+            project["deleted_clips"] = deleted
+            clip = dict(bag.get("clip") or {})
+            if not clip.get("id"):
+                raise DogSCError("恢复数据损坏。")
+            index = min(max(int(bag.get("index") or len(project["clips"])), 0), len(project["clips"]))
+            clips = list(project["clips"])
+            clips.insert(index, clip)
+            project["clips"] = clips
+            project["zooms"] = list(project["zooms"]) + list(bag.get("zooms") or [])
+            project["markers"] = list(project["markers"]) + list(bag.get("markers") or [])
+        elif action == "marker-update":
+            marker_id = str(body.get("id") or "")
+            marker = next((item for item in project["markers"] if item.get("id") == marker_id), None)
+            if marker is None:
+                raise DogSCError("找不到这个标记。")
+            if "label" in body:
+                marker["label"] = str(body["label"])[:40]
+            if "local" in body:
+                marker["local"] = max(float(body["local"]), 0)
+        elif action == "marker-delete":
+            marker_id = str(body.get("id") or "")
+            before = len(project["markers"])
+            project["markers"] = [item for item in project["markers"] if item.get("id") != marker_id]
+            if len(project["markers"]) == before:
+                raise DogSCError("找不到这个标记。")
         elif action == "trim":
             project["clips"], project["zooms"], project["markers"] = trim_clip(
                 project["clips"], project["zooms"], project["markers"],
@@ -504,6 +577,16 @@ def _merge_canvas(canvas: dict, incoming: dict) -> dict:
         if kind not in BACKGROUND_KINDS:
             raise DogSCError("不支持的背景类型。")
         canvas["background_kind"] = kind
+    if "background_image" in incoming:
+        image = incoming["background_image"]
+        if image in (None, ""):
+            canvas["background_image"] = None
+        else:
+            text = str(image)
+            if text.startswith("/api/wallpapers/") or resolve_wallpaper(text.split("/")[-1]) or resolve_wallpaper(text):
+                canvas["background_image"] = text
+            else:
+                raise DogSCError("壁纸路径无效。")
     if "pattern" in incoming:
         pattern = str(incoming["pattern"])
         if pattern not in PATTERN_PRESETS:
@@ -523,6 +606,8 @@ def _merge_canvas(canvas: dict, incoming: dict) -> dict:
         canvas["frame_title"] = str(incoming["frame_title"])[:40]
     if "frame_address" in incoming:
         canvas["frame_address"] = str(incoming["frame_address"])[:80]
+    if "crop" in incoming and isinstance(incoming["crop"], dict):
+        canvas["crop"] = clamp_crop(incoming["crop"])
     return canvas
 
 
