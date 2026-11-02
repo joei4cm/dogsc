@@ -31,14 +31,18 @@ def main(argv: list[str] | None = None) -> None:
     doctor.add_argument("--json", action="store_true")
 
     record = sub.add_parser("record", help="开始录制，Ctrl+C 结束")
-    record.add_argument("--source", choices=["display", "window", "region"], default="display")
+    record.add_argument("--source", choices=["display", "window", "region", "camera", "phone"], default="display")
     record.add_argument("--display", type=int, default=0)
     record.add_argument("--window")
     record.add_argument("--geometry", help="x,y,width,height")
+    record.add_argument("--camera-device", help="V4L2 设备，例如 /dev/video0")
+    record.add_argument("--camera", action="store_true", help="录屏时同时收录摄像头画中画")
+    record.add_argument("--phone-id", help="Android serial 或 iOS UDID")
+    record.add_argument("--phone-platform", choices=["android", "ios"], default="android")
     record.add_argument("--fps", type=int, choices=[30, 60], default=30)
     record.add_argument("--mic", action="store_true")
     record.add_argument("--system", action="store_true")
-    record.add_argument("--backend", choices=["x11", "hyprland", "portal", "fixture"])
+    record.add_argument("--backend", choices=["x11", "hyprland", "portal", "fixture", "camera", "phone"])
     record.add_argument("--duration", type=float, default=1, help="仅 fixture 后端使用")
 
     sub.add_parser("mark", help="给正在进行的录制打一个标记")
@@ -97,6 +101,14 @@ def _doctor(as_json: bool) -> None:
     print(f"录制方式：{desktop.as_dict()['backend_label']}")
     print(f"麦克风：{desktop.microphone or '不可用'}")
     print(f"系统声音：{desktop.system_audio or '不可用'}")
+    inputs = desktop.as_dict().get("inputs") or {}
+    print(
+        "输入："
+        f"屏幕={'是' if inputs.get('screen') else '否'} · "
+        f"摄像头={'是' if inputs.get('camera') else '否'} · "
+        f"Android={'是' if inputs.get('android') else '否'} · "
+        f"iOS枚举={'是' if inputs.get('ios_detect') else '否'}"
+    )
     for hint in desktop.hints:
         print(f"- {hint}")
 
@@ -119,6 +131,10 @@ def _record(args: argparse.Namespace) -> None:
         "system_audio": args.system,
         "backend": args.backend,
         "duration": args.duration,
+        "camera": bool(args.camera),
+        "camera_device": args.camera_device,
+        "phone_id": args.phone_id,
+        "phone_platform": args.phone_platform,
     })
     print("正在录制。Ctrl+C 结束。另开一个终端执行 dogsc mark 可以打标记。", flush=True)
     try:

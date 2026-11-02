@@ -6,7 +6,8 @@ import subprocess
 from dogsc.backgrounds import dynamic_png, pattern_png, solid_color
 from dogsc.errors import DogSCError
 from dogsc.frames import frame_metrics, render_frame
-from dogsc.media import cursor_png, rounded_mask
+from dogsc.media import cursor_png, rounded_mask, probe
+from dogsc.model import clamp_crop
 from dogsc.zoom import absolute_zooms, clip_duration, sample, viewport
 
 
@@ -14,6 +15,31 @@ def even(value: float) -> int:
     number = int(round(value))
     number -= number % 2
     return max(number, 2)
+
+
+def camera_pip_layout(camera: dict, content_w: int, content_h: int) -> dict[str, int | str]:
+    """Map Soft Silver camera inspector knobs onto content-box pixels."""
+    size = min(max(float(camera.get("size") or 0.22), 0.08), 0.5)
+    cx = min(max(float(camera.get("x") if camera.get("x") is not None else 0.82), 0), 1)
+    cy = min(max(float(camera.get("y") if camera.get("y") is not None else 0.78), 0), 1)
+    shape = str(camera.get("shape") or "circle")
+    base = max(even(content_w * size), 2)
+    if shape in {"circle", "square"}:
+        width = height = base
+    elif shape == "vertical":
+        width = base
+        height = max(even(base * 16 / 9), 2)
+    elif shape == "horizontal":
+        width = max(even(base * 16 / 9), 2)
+        height = base
+    else:  # original — assume 16:9 box; scale keeps AR later
+        width = max(even(base * 16 / 9), 2)
+        height = base
+    x = int(cx * content_w - width / 2)
+    y = int(cy * content_h - height / 2)
+    x = min(max(x, 0), max(content_w - width, 0))
+    y = min(max(y, 0), max(content_h - height, 0))
+    return {"x": x, "y": y, "w": width, "h": height, "shape": shape}
 
 
 def canvas_size(src_w: int, src_h: int, aspect: str, resolution: str) -> tuple[int, int]:
@@ -303,10 +329,17 @@ def build_export(project: dict, media: Path, pointer: list[dict], output: Path, 
     cursor = project.get("cursor") or {}
     export = project.get("export") or {}
     fps = int(export.get("fps") or 30)
-    canvas_w, canvas_h = canvas_size(src_w, src_h, str(canvas.get("aspect") or "source"), str(export.get("resolution") or "source"))
+    crop = clamp_crop(canvas.get("crop"))
+    cropped_w = max(even(src_w * float(crop["width"])), 2)
+    cropped_h = max(even(src_h * float(crop["height"])), 2)
+    crop_x = max(int(round(src_w * float(crop["x"]))), 0)
+    crop_y = max(int(round(src_h * float(crop["y"]))), 0)
+    crop_x = min(crop_x, max(src_w - cropped_w, 0))
+    crop_y = min(crop_y, max(src_h - cropped_h, 0))
+    canvas_w, canvas_h = canvas_size(cropped_w, cropped_h, str(canvas.get("aspect") or "source"), str(export.get("resolution") or "source"))
     frame_style = str(canvas.get("screen_frame") or "none")
     box = content_layout(
-        src_w, src_h, canvas_w, canvas_h,
+        cropped_w, cropped_h, canvas_w, canvas_h,
         float(canvas.get("padding") or 0),
         float(canvas.get("content_scale") or 1),
         float(canvas.get("content_x") if canvas.get("content_x") is not None else 0.5),
@@ -384,6 +417,28 @@ def build_export(project: dict, media: Path, pointer: list[dict], output: Path, 
         sticker_inputs.append((next_input, sticker))
         next_input += 1
 
+    camera = project.get("camera") or {}
+    camera_index = None
+    camera_mask_index = None
+    camera_path = media.parent / str(camera.get("media") or "camera.mp4")
+    if bool(camera.get("enabled")) and camera_path.is_file():
+        inputs.extend(["-i", str(camera_path)])
+        camera_index = next_input
+        next_input += 1
+        # Placeholder layout uses content box size; refined again when composing.
+        preview_pip = camera_pip_layout(camera, box["content_w"], box["content_h"])
+        if preview_pip["shape"] == "circle":
+            cam_mask_path = work / "camera-mask.png"
+            rounded_mask(
+                cam_mask_path,
+                int(preview_pip["w"]),
+                int(preview_pip["h"]),
+                min(int(preview_pip["w"]), int(preview_pip["h"])) / 2,
+            )
+            inputs.extend(["-loop", "1", "-framerate", str(fps), "-i", str(cam_mask_path)])
+            camera_mask_index = next_input
+            next_input += 1
+
     graph = [video_segments(project["clips"])]
     current = "cat"
     if cursor_index is not None:
@@ -423,6 +478,13 @@ def build_export(project: dict, media: Path, pointer: list[dict], output: Path, 
                 f"[mkeep{index}][{label}]overlay=x={x}:y={y}:enable='between({time_token()},{start:.3f},{end:.3f})'[{next_label}]"
             )
         current = next_label
+
+    # Source crop (canvas.crop) sits after mosaics and before zoom framing.
+    if abs(float(crop["width"]) - 1.0) > 1e-4 or abs(float(crop["height"]) - 1.0) > 1e-4 or crop_x or crop_y:
+        graph.append(
+            f"[{current}]crop={cropped_w}:{cropped_h}:{crop_x}:{crop_y}[srccrop]"
+        )
+        current = "srccrop"
 
     motion_filter = screen_motion_filter(motions, box["content_w"], box["content_h"])
     graph.append(
@@ -488,6 +550,39 @@ def build_export(project: dict, media: Path, pointer: list[dict], output: Path, 
         )
         current = f"stout{index}"
 
+    if camera_index is not None:
+        pip = camera_pip_layout(camera, box["content_w"], box["content_h"])
+        pip_x = int(box["x"] + pip["x"])
+        pip_y = int(box["y"] + pip["y"])
+        mirror = ",hflip" if camera.get("mirror") else ""
+        opacity = min(max(float(camera.get("opacity") if camera.get("opacity") is not None else 1), 0.05), 1)
+        border = max(int(float(camera.get("border") or 0)), 0)
+        border_color = hex_color(str(camera.get("border_color") or "#ffffff"))
+        graph.append(
+            f"[{camera_index}:v]fps={fps},scale={pip['w']}:{pip['h']}:force_original_aspect_ratio=increase,"
+            f"crop={pip['w']}:{pip['h']}{mirror},format=rgba,colorchannelmixer=aa={opacity:.3f}[campip]"
+        )
+        cam_label = "campip"
+        if camera_mask_index is not None:
+            graph.append(
+                f"[{camera_mask_index}:v]scale={pip['w']}:{pip['h']},format=rgba[cammask];"
+                f"[campip][cammask]alphamerge[campipa]"
+            )
+            cam_label = "campipa"
+        if border > 0:
+            bw = border
+            graph.append(
+                f"color=c={border_color}:s={pip['w'] + bw * 2}x{pip['h'] + bw * 2}:r={fps}:d={duration + 1:.3f},"
+                f"format=rgba[camborder];"
+                f"[camborder][{cam_label}]overlay=x={bw}:y={bw}:shortest=1[cambordered];"
+                f"[{current}][cambordered]overlay=x={pip_x - bw}:y={pip_y - bw}:shortest=1[withcam]"
+            )
+        else:
+            graph.append(
+                f"[{current}][{cam_label}]overlay=x={pip_x}:y={pip_y}:shortest=1[withcam]"
+            )
+        current = "withcam"
+
     graph.append(
         f"[{current}]trim=duration={duration:.3f},setpts=PTS-STARTPTS,format=yuv420p[vout]"
     )
@@ -520,6 +615,24 @@ def _render_background(path: Path, canvas: dict, width: int, height: int) -> Non
         return
     if kind == "dynamic":
         dynamic_png(path, width, height, str(canvas.get("dynamic") or "auroraFluid"))
+        return
+    if kind == "image":
+        from dogsc.wallpapers import resolve_wallpaper
+        source = resolve_wallpaper(str(canvas.get("background_image") or ""))
+        if source and source.is_file():
+            completed = subprocess.run(
+                [
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "-i", str(source),
+                    "-vf", f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}",
+                    str(path),
+                ],
+                check=False,
+                capture_output=True,
+            )
+            if completed.returncode == 0 and path.is_file():
+                return
+        solid_color(path, width, height, str(canvas.get("background") or "#16161a"))
         return
     solid_color(path, width, height, str(canvas.get("background") or "#16161a"))
 
@@ -622,3 +735,46 @@ def preview_sample(project: dict, time: float) -> dict[str, float]:
             }
             break
     return {**sampled, **frame, "motion": motion}
+
+
+def estimate_export(project: dict, media: Path | None = None) -> dict:
+    """Rough byte/size estimate for the Soft Silver export sheet."""
+    canvas = project.get("canvas") or {}
+    export = project.get("export") or {}
+    clips = project.get("clips") or []
+    duration = max(sum(clip_duration(clip) for clip in clips), 0.1)
+    fps = int(export.get("fps") or 30)
+    src_w = src_h = 1920
+    if media and Path(media).is_file():
+        try:
+            info = probe(Path(media))
+            src_w = int(info["width"] or src_w)
+            src_h = int(info["height"] or src_h)
+        except Exception:
+            pass
+    else:
+        media_info = project.get("media") or {}
+        src_w = int(media_info.get("width") or src_w)
+        src_h = int(media_info.get("height") or src_h)
+    crop = clamp_crop(canvas.get("crop"))
+    cropped_w = max(even(src_w * float(crop["width"])), 2)
+    cropped_h = max(even(src_h * float(crop["height"])), 2)
+    width, height = canvas_size(
+        cropped_w,
+        cropped_h,
+        str(canvas.get("aspect") or "source"),
+        str(export.get("resolution") or "1080p"),
+    )
+    megapixels = (width * height) / 1_000_000
+    # Soft H.264-ish bitrate curve used only for UI sizing, not encoding.
+    mbps = max(2.5, min(28.0, 3.2 + megapixels * 2.4)) * (fps / 30)
+    audio_mbps = 0.16
+    bytes_est = int((mbps + audio_mbps) * 1_000_000 / 8 * duration)
+    return {
+        "width": width,
+        "height": height,
+        "fps": fps,
+        "duration": duration,
+        "megabits_per_second": round(mbps + audio_mbps, 2),
+        "bytes": bytes_est,
+    }

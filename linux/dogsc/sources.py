@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
 import json
 import re
+import shutil
 import subprocess
 
 
@@ -261,3 +263,255 @@ def list_x11_windows() -> list[dict]:
         if len(windows) >= 40:
             break
     return windows
+
+
+# —— Cameras (V4L2) & phones (Android adb / iOS libimobiledevice) ——
+
+
+def parse_v4l2_sysfs(names: dict[str, str]) -> list[dict]:
+    """Build camera list from {device_node: card_name}."""
+    cameras = []
+    for node, name in sorted(names.items()):
+        path = node if node.startswith("/dev/") else f"/dev/{node}"
+        index = "".join(ch for ch in path if ch.isdigit())
+        cameras.append({
+            "id": path,
+            "path": path,
+            "name": name or f"Camera {index or path}",
+            "kind": "v4l2",
+        })
+    return cameras
+
+
+def parse_v4l2_ctl_list(text: str) -> list[dict]:
+    """Parse `v4l2-ctl --list-devices` output."""
+    cameras: list[dict] = []
+    name = None
+    for line in (text or "").splitlines():
+        if not line.strip():
+            name = None
+            continue
+        if not line.startswith("\t") and not line.startswith(" "):
+            name = line.split("(", 1)[0].strip() or line.strip()
+            continue
+        path = line.strip()
+        if path.startswith("/dev/video"):
+            cameras.append({
+                "id": path,
+                "path": path,
+                "name": name or path,
+                "kind": "v4l2",
+            })
+    # Prefer even-numbered capture nodes when duplicates share a name.
+    dedup: dict[str, dict] = {}
+    for item in cameras:
+        key = item["name"]
+        if key not in dedup:
+            dedup[key] = item
+            continue
+        # Keep the lower /dev/videoN as primary capture node.
+        if item["path"] < dedup[key]["path"]:
+            dedup[key] = item
+    return list(dedup.values())
+
+
+def parse_ffmpeg_v4l2_devices(text: str) -> list[dict]:
+    """Parse `ffmpeg -f v4l2 -list_devices true -i dummy` stderr."""
+    cameras: list[dict] = []
+    for line in (text or "").splitlines():
+        # [video4linux2,v4l2 @ ...] /dev/video0 [USB Camera]:
+        if "/dev/video" not in line:
+            continue
+        match = re.search(r"(/dev/video\d+)\s*(?:\[([^\]]+)\])?", line)
+        if not match:
+            continue
+        path = match.group(1)
+        name = (match.group(2) or path).strip()
+        cameras.append({"id": path, "path": path, "name": name, "kind": "v4l2"})
+    seen = set()
+    unique = []
+    for item in cameras:
+        if item["id"] in seen:
+            continue
+        seen.add(item["id"])
+        unique.append(item)
+    return unique
+
+
+def list_cameras() -> list[dict]:
+    sys_root = Path("/sys/class/video4linux")
+    if sys_root.is_dir():
+        names: dict[str, str] = {}
+        for entry in sorted(sys_root.iterdir()):
+            node = f"/dev/{entry.name}"
+            if not Path(node).exists():
+                continue
+            name = ""
+            try:
+                name = (entry / "name").read_text(encoding="utf-8").strip()
+            except OSError:
+                name = entry.name
+            # Skip metadata-only nodes when a capture sibling exists.
+            names[node] = name or entry.name
+        cameras = parse_v4l2_sysfs(names)
+        if cameras:
+            return cameras
+    if shutil.which("v4l2-ctl"):
+        try:
+            completed = subprocess.run(
+                ["v4l2-ctl", "--list-devices"],
+                check=False, capture_output=True, text=True,
+            )
+            cameras = parse_v4l2_ctl_list(completed.stdout or completed.stderr or "")
+            if cameras:
+                return cameras
+        except OSError:
+            pass
+    if shutil.which("ffmpeg"):
+        try:
+            completed = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-f", "v4l2", "-list_devices", "true", "-i", "dummy"],
+                check=False, capture_output=True, text=True,
+            )
+            return parse_ffmpeg_v4l2_devices(completed.stderr or completed.stdout or "")
+        except OSError:
+            return []
+    return []
+
+
+def camera_record_command(device: str, fps: int, audio: list[str], output: str, size: str | None = None) -> list[str]:
+    command = [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "warning",
+        "-thread_queue_size", "512",
+        "-f", "v4l2",
+        "-framerate", str(int(fps)),
+    ]
+    if size:
+        command.extend(["-video_size", size])
+    command.extend(["-i", device])
+    command.extend(audio_input_args(audio))
+    command.extend(video_encode_args())
+    command.extend(audio_encode_args(len(audio)))
+    command.extend(["-movflags", "+faststart", output])
+    return command
+
+
+def camera_sidecar_command(device: str, fps: int, output: str) -> list[str]:
+    """Silent camera-only sidecar for PiP during screen capture."""
+    return camera_record_command(device, fps, [], output)
+
+
+def parse_adb_devices(text: str) -> list[dict]:
+    phones: list[dict] = []
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("List of devices") or line.startswith("*"):
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        serial, state = parts[0], parts[1]
+        if state != "device":
+            continue
+        model = ""
+        for part in parts[2:]:
+            if part.startswith("model:"):
+                model = part.split(":", 1)[1].replace("_", " ")
+        phones.append({
+            "id": serial,
+            "serial": serial,
+            "name": model or serial,
+            "platform": "android",
+            "state": state,
+            "transport": "adb",
+            "ready": True,
+            "hint": None,
+        })
+    return phones
+
+
+def parse_idevice_list(text: str) -> list[dict]:
+    phones: list[dict] = []
+    for line in (text or "").splitlines():
+        udid = line.strip()
+        if not udid or len(udid) < 16:
+            continue
+        phones.append({
+            "id": udid,
+            "serial": udid,
+            "name": f"iPhone ({udid[:8]}…)",
+            "platform": "ios",
+            "state": "connected",
+            "transport": "usbmuxd",
+            "ready": False,
+            "hint": "linux-ios-continuity",
+        })
+    return phones
+
+
+def list_android_phones() -> list[dict]:
+    if not shutil.which("adb"):
+        return []
+    try:
+        completed = subprocess.run(
+            ["adb", "devices", "-l"],
+            check=False, capture_output=True, text=True,
+        )
+        return parse_adb_devices(completed.stdout or "")
+    except OSError:
+        return []
+
+
+def list_ios_phones() -> list[dict]:
+    if not shutil.which("idevice_id"):
+        return []
+    try:
+        completed = subprocess.run(
+            ["idevice_id", "-l"],
+            check=False, capture_output=True, text=True,
+        )
+        return parse_idevice_list(completed.stdout or "")
+    except OSError:
+        return []
+
+
+def list_phones() -> list[dict]:
+    return list_android_phones() + list_ios_phones()
+
+
+def android_scrcpy_command(serial: str, fps: int, output: str) -> list[str]:
+    # Prefer modern flags; callers should tolerate older scrcpy missing --no-playback.
+    return [
+        "scrcpy",
+        "-s", serial,
+        "--no-playback",
+        f"--max-fps={int(fps)}",
+        f"--record={output}",
+    ]
+
+
+def android_adb_screenrecord_command(serial: str, remote_path: str = "/sdcard/dogsc-capture.mp4") -> list[str]:
+    """Starts on-device screenrecord; caller must pull + interrupt on stop."""
+    return [
+        "adb", "-s", serial, "shell",
+        "screenrecord", "--bit-rate", "8000000", remote_path,
+    ]
+
+
+def phone_capabilities() -> dict:
+    ffmpeg_text = ""
+    if shutil.which("ffmpeg"):
+        try:
+            ffmpeg_text = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-devices"],
+                check=False, capture_output=True, text=True,
+            ).stdout or ""
+        except OSError:
+            ffmpeg_text = ""
+    return {
+        "adb": bool(shutil.which("adb")),
+        "scrcpy": bool(shutil.which("scrcpy")),
+        "idevice": bool(shutil.which("idevice_id")),
+        "v4l2": bool(Path("/sys/class/video4linux").is_dir()) or bool(re.search(r"\bv4l2\b", ffmpeg_text)),
+        "ios_note": "iPhone Continuity Camera / 有线投屏在 Linux 不可用；若手机以 UVC 摄像头出现，请选摄像头源。Android 推荐 scrcpy 或 adb screenrecord。",
+    }
