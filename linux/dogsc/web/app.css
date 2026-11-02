@@ -140,20 +140,33 @@ input[type="range"]::-moz-range-thumb {
   isolation: isolate;
 }
 @supports (corner-shape: squircle) {
-  .island, .recorder-popover, .hud-menu, .export-sheet {
+  .island, .recorder-popover, .hud-menu, .export-sheet, .projects-drawer, .shortcuts-panel {
     border-radius: var(--squircle);
+    corner-shape: squircle;
+  }
+  .canvas-frame {
+    border-radius: 12px;
     corner-shape: squircle;
   }
 }
 .island::before,
 .recorder-capsule::before,
 .recorder-popover::before,
-.hud-menu::before {
+.hud-menu::before,
+.projects-drawer::before {
   content: "";
   position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 2;
   box-shadow:
     inset 0 0.5px 0 rgba(255, 255, 255, 0.95),
     inset 0 0 0 0.5px rgba(26, 31, 46, 0.075);
+}
+.island::after,
+.recorder-popover::after,
+.projects-drawer::after {
+  content: "";
+  position: absolute; left: 8%; right: 8%; bottom: 0; height: 1px;
+  pointer-events: none; z-index: 2; border-radius: inherit;
+  background: linear-gradient(90deg, transparent, rgba(0,0,0,0.06), transparent);
 }
 .recorder-capsule,
 .stage-hud {
@@ -186,19 +199,19 @@ input[type="range"]::-moz-range-thumb {
 
 .icon-svg {
   width: 17px; height: 17px; display: block; stroke: currentColor; fill: none;
-  stroke-width: 1.55; stroke-linecap: round; stroke-linejoin: round;
+  stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
 }
-.icon-svg.sm { width: 15px; height: 15px; }
+.icon-svg.sm { width: 15px; height: 15px; stroke-width: 1.45; }
 .icon-svg.fill { fill: currentColor; stroke: none; }
 
-/* —— Home —— */
+/* —— Home —— Soft Silver: brand in chrome, recorder island is the stage hero */
 .home-shell {
   height: 100%;
   display: grid;
   grid-template-rows: 52px 1fr;
   background:
-    radial-gradient(ellipse at 50% 28%, rgba(255,255,255,0.78), transparent 46%),
-    radial-gradient(ellipse at 50% 100%, rgba(26, 31, 46, 0.045), transparent 42%),
+    radial-gradient(ellipse at 50% 42%, rgba(255,255,255,0.72), transparent 52%),
+    radial-gradient(ellipse at 50% 110%, rgba(26, 31, 46, 0.055), transparent 48%),
     var(--bg);
   position: relative;
   overflow: hidden;
@@ -209,20 +222,25 @@ input[type="range"]::-moz-range-thumb {
   background-image: radial-gradient(circle, rgba(0,0,0,0.11) 0.6px, transparent 0.7px);
   background-size: 24px 24px;
   background-position: 12px 12px;
-  mask-image: radial-gradient(ellipse at 50% 42%, #000 40%, transparent 78%);
+  mask-image: radial-gradient(ellipse at 50% 45%, #000 35%, rgba(0,0,0,0.35) 58%, transparent 78%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 45%, #000 35%, rgba(0,0,0,0.35) 58%, transparent 78%);
 }
 .topbar {
   position: relative; z-index: 2;
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 0 16px;
-  background: rgba(253, 253, 254, 0.72);
+  background: rgba(253, 253, 254, 0.78);
   border-bottom: 0.5px solid var(--line);
   backdrop-filter: saturate(1.2) blur(18px);
   -webkit-backdrop-filter: saturate(1.2) blur(18px);
 }
+.home-topbar { height: 52px; }
 .brand { display: flex; align-items: center; gap: 10px; min-width: 160px; }
+.brand-hero strong {
+  font-size: 15px; font-weight: 650; letter-spacing: -0.02em;
+}
 .brand .logo {
-  width: 22px; height: 22px; border-radius: 7px;
+  width: 24px; height: 24px; border-radius: 7px;
   background: linear-gradient(155deg, #f7f7f8 0%, #c8c8cc 38%, #8a8a8e 72%, #5c5c60 100%);
   box-shadow:
     0 1px 0 rgba(255,255,255,0.55) inset,
@@ -232,6 +250,14 @@ input[type="range"]::-moz-range-thumb {
 .brand strong { display: block; font-size: 13px; font-weight: 600; letter-spacing: -0.015em; }
 .brand em { font-style: normal; color: var(--faint); font-size: 11px; font-weight: 500; }
 .top-center { display: flex; align-items: center; gap: 8px; flex: 1; justify-content: center; min-width: 0; }
+.home-lead {
+  justify-content: flex-start;
+  color: var(--muted); font-size: 12px; font-weight: 500;
+  letter-spacing: -0.01em; padding: 0 8px;
+}
+.home-lead span {
+  max-width: 42ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .top-center input.title {
   border: 0; background: transparent; text-align: center; font-weight: 600; font-size: 13px;
   min-width: 120px; max-width: 280px; padding: 6px 10px; border-radius: var(--radius-compact);
@@ -247,33 +273,56 @@ input[type="range"]::-moz-range-thumb {
   padding: 24px 24px 120px;
   min-height: 0;
 }
-.home-copy { text-align: center; max-width: 380px; margin-bottom: 18px; }
-.home-copy h1 {
-  margin: 0 0 8px; font-size: 28px; font-weight: 600; letter-spacing: -0.03em;
+.home-stage-wash {
+  /* Quiet stage plate behind the floating recorder — not a second hero */
+  position: absolute; width: min(760px, 72%); aspect-ratio: 16 / 10;
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(253,253,254,0.42), transparent 38%),
+    linear-gradient(180deg, rgba(0,0,0,0.018), rgba(0,0,0,0.03));
+  box-shadow:
+    inset 0 0 0 0.5px rgba(26, 31, 46, 0.045),
+    0 1px 2px rgba(26, 31, 46, 0.04),
+    0 24px 48px rgba(26, 31, 46, 0.05);
+  pointer-events: none;
 }
-.home-copy p { margin: 0; color: var(--muted); line-height: 1.55; font-size: 13px; font-weight: 400; text-wrap: pretty; }
-.home-actions {
-  display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px;
+@supports (corner-shape: squircle) {
+  .home-stage-wash {
+    border-radius: 16px;
+    corner-shape: squircle;
+  }
 }
-.home-shell[data-enter="1"] .home-copy,
-.home-shell[data-enter="1"] .projects-drawer,
-.home-shell[data-enter="1"] .recorder-dock {
+.home-shell[data-enter="1"] .projects-drawer {
   animation: softEnter 0.52s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: 0.06s;
 }
-.home-shell[data-enter="1"] .projects-drawer { animation-delay: 0.06s; }
-.home-shell[data-enter="1"] .recorder-dock { animation-delay: 0.12s; }
+.home-shell[data-enter="1"] .recorder-dock {
+  animation: softEnterCenter 0.56s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: 0.1s;
+}
+.home-shell[data-enter="1"] .home-stage-wash {
+  animation: softEnterWash 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
 @keyframes softEnter {
   from { opacity: 0; transform: translateY(10px) scale(0.985); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
+@keyframes softEnterCenter {
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 14px)) scale(0.96); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+@keyframes softEnterWash {
+  from { opacity: 0; transform: scale(0.985); }
+  to { opacity: 1; transform: scale(1); }
+}
 @media (prefers-reduced-motion: reduce) {
-  .home-shell[data-enter="1"] .home-copy,
   .home-shell[data-enter="1"] .projects-drawer,
-  .home-shell[data-enter="1"] .recorder-dock { animation: none; }
+  .home-shell[data-enter="1"] .recorder-dock,
+  .home-shell[data-enter="1"] .home-stage-wash { animation: none; }
 }
 
 .projects-drawer {
-  position: absolute; right: 18px; top: 72px; bottom: 110px; width: min(300px, 34vw);
+  position: absolute; right: 18px; top: 72px; bottom: 110px; width: min(280px, 30vw);
   z-index: 3; display: flex; flex-direction: column; min-height: 0;
   padding: 14px; overflow: hidden;
   border-radius: var(--radius-island);
@@ -315,13 +364,14 @@ input[type="range"]::-moz-range-thumb {
 
 /* Recorder capsule */
 .recorder-dock {
-  position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%);
+  /* Soft Silver home hero: capsule floats as the only primary composition */
+  position: absolute; left: 50%; top: 52%; bottom: auto; transform: translate(-50%, -50%);
   z-index: 5; display: flex; flex-direction: column; align-items: center; gap: 10px;
 }
 .recorder-capsule {
   display: flex; align-items: center; gap: 0;
-  height: 56px; padding: 0 8px;
-  min-width: 280px;
+  height: 60px; padding: 0 10px;
+  min-width: 320px;
   transition:
     transform 0.36s cubic-bezier(0.22, 0.9, 0.3, 1),
     width 0.5s cubic-bezier(0.22, 0.9, 0.3, 1),
@@ -330,6 +380,10 @@ input[type="range"]::-moz-range-thumb {
     border-radius 0.5s cubic-bezier(0.22, 0.9, 0.3, 1),
     padding 0.5s cubic-bezier(0.22, 0.9, 0.3, 1);
   will-change: transform, width;
+  box-shadow:
+    var(--contact-shadow),
+    0 12px 28px rgba(26, 31, 46, 0.12),
+    0 28px 56px rgba(26, 31, 46, 0.07);
 }
 .recorder-capsule.is-live {
   min-width: 168px;
@@ -471,9 +525,15 @@ input[type="range"]::-moz-range-thumb {
 .editor > .workspace { grid-area: main; }
 .editor > .timeline { grid-area: timeline; }
 .inspector-scope {
-  background: var(--well); border-radius: var(--radius-group); padding: 10px;
-  margin-bottom: 12px;
+  background: var(--well); border-radius: var(--radius-group); padding: 9px;
+  margin-bottom: 10px;
   box-shadow: none;
+}
+.inspector-body .section + .section { margin-top: 2px; }
+.inspector-body .section-title + .preset-grid,
+.inspector-body .section-title + .wallpaper-grid,
+.inspector-body .section-title + .segmented {
+  margin-top: 2px;
 }
 .scope-add {
   width: 100%; height: 30px; border-radius: 999px;
@@ -499,7 +559,9 @@ input[type="range"]::-moz-range-thumb {
   font-style: normal; color: var(--ink); font-weight: 600;
   font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
 }
-.wallpaper-grid .tile { height: 52px; }
+.wallpaper-grid { gap: 5px; }
+.wallpaper-grid .tile { height: 44px; border-radius: 9px; }
+.wallpaper-grid .tile span { font-size: 10px; font-weight: 550; bottom: 5px; left: 7px; }
 .coord-row {
   display: flex; gap: 16px; margin: 0 0 12px;
   font-variant-numeric: tabular-nums; font-size: 12px; color: var(--muted); font-weight: 500;
@@ -551,13 +613,13 @@ input[type="range"]::-moz-range-thumb {
 .workspace {
   min-height: 0;
   display: grid;
-  /* Apple inspector default 384 (clamp 340–480); web default 360, drag 340–480 */
-  grid-template-columns: 1fr var(--inspector-w, 360px);
+  /* Apple inspector default 384 (clamp 340–480) */
+  grid-template-columns: 1fr var(--inspector-w, 384px);
   position: relative;
 }
 .splitter-v {
   position: absolute; top: 0; bottom: 0; width: 8px;
-  right: var(--inspector-w, 360px); margin-right: -4px;
+  right: var(--inspector-w, 384px); margin-right: -4px;
   cursor: col-resize; z-index: 8;
 }
 .splitter-v::after {
@@ -858,17 +920,17 @@ body.alt-cut .lanes { cursor: col-resize; }
 
 /* Stage HUD — regularMaterial over media */
 .stage-hud {
-  position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
   z-index: 4;
-  display: flex; align-items: center; gap: 2px;
-  height: 44px; padding: 4px;
-  background: rgba(253, 253, 254, 0.72);
-  backdrop-filter: saturate(1.35) blur(22px);
-  -webkit-backdrop-filter: saturate(1.35) blur(22px);
+  display: flex; align-items: center; gap: 1px;
+  height: 40px; padding: 3px;
+  background: rgba(253, 253, 254, 0.86);
+  backdrop-filter: saturate(1.3) blur(20px);
+  -webkit-backdrop-filter: saturate(1.3) blur(20px);
   box-shadow:
     var(--contact-shadow),
-    0 8px 24px rgba(26, 31, 46, 0.12),
-    inset 0 0.5px 0 rgba(255,255,255,0.85);
+    0 6px 18px rgba(26, 31, 46, 0.09),
+    inset 0 0.5px 0 rgba(255,255,255,0.92);
 }
 .stage-hud::before {
   content: "";
@@ -877,8 +939,8 @@ body.alt-cut .lanes { cursor: col-resize; }
 }
 .hud-btn {
   position: relative; z-index: 1;
-  height: 36px; min-width: 36px; padding: 0 10px; border-radius: 999px;
-  color: var(--muted); display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 34px; min-width: 34px; padding: 0 9px; border-radius: 999px;
+  color: var(--muted); display: inline-flex; align-items: center; justify-content: center; gap: 5px;
   font-size: 12px; font-weight: 500;
 }
 .hud-btn:hover {
@@ -896,11 +958,11 @@ body.alt-cut .lanes { cursor: col-resize; }
 }
 .play-btn {
   position: relative; z-index: 1;
-  width: 36px; height: 36px; border-radius: 999px;
+  width: 34px; height: 34px; border-radius: 999px;
   background: linear-gradient(180deg, #2c2c2c, var(--platinum-deep));
   color: var(--on-accent);
   display: grid; place-items: center;
-  box-shadow: 0 1px 0 rgba(255,255,255,0.14) inset, 0 4px 12px rgba(26, 31, 46, 0.22);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.14) inset, 0 3px 10px rgba(26, 31, 46, 0.2);
 }
 .play-btn.playing { box-shadow: 0 1px 0 rgba(255,255,255,0.14) inset, 0 0 0 4px rgba(31,31,31,0.12); }
 .hud-time {
@@ -1020,9 +1082,9 @@ body.alt-cut .lanes { cursor: col-resize; }
   width: 28px; height: 28px; border-radius: 99px; border: 0;
   box-shadow: inset 0 0 0 0.5px rgba(26, 31, 46, 0.1), 0 1px 2px rgba(26, 31, 46, 0.08);
 }
-.preset-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+.preset-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; }
 .preset-grid .tile {
-  width: auto; height: 52px; border-radius: var(--radius-control); border: 0;
+  width: auto; height: 44px; border-radius: 9px; border: 0;
   background-size: cover; background-position: center; position: relative; overflow: hidden;
   box-shadow: inset 0 0 0 0.5px rgba(26, 31, 46, 0.08);
 }
@@ -1178,23 +1240,23 @@ body.alt-cut .lanes { cursor: col-resize; }
   display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12px;
 }
 .tl-zoom input[type="range"] { width: 88px; }
-.lanes { position: relative; overflow: auto; padding: 8px 12px 16px; }
+.lanes { position: relative; overflow: auto; padding: 6px 12px 14px; }
 .lane-label {
   position: sticky; left: 0; z-index: 2; width: 72px; font-size: 11px; color: var(--faint);
   display: flex; align-items: center; font-weight: 500;
-  background: linear-gradient(90deg, #f6f6f8 70%, transparent);
+  background: linear-gradient(90deg, var(--panel) 72%, transparent);
 }
 .lane {
-  position: relative; height: 44px; margin-top: 6px; border-radius: 9px;
-  background: rgba(0, 0, 0, 0.028); margin-left: 76px;
+  position: relative; height: 40px; margin-top: 5px; border-radius: 8px;
+  background: rgba(0, 0, 0, 0.022); margin-left: 76px;
 }
 .clip, .zoom, .motion, .mosaic, .sticker-clip {
   position: absolute; top: 6px; bottom: 6px; border-radius: var(--radius-compact); overflow: hidden;
 }
 .clip {
-  /* Apple timelineClipTop/Bottom ~0.88/0.83 — primary filmstrip on raised paper */
-  background: linear-gradient(180deg, #e0e1e4, #d3d4d8); display: flex;
-  box-shadow: inset 0 0 0 0.65px rgba(26, 31, 46, 0.08);
+  /* Apple timelineClipTop/Bottom ~0.88/0.83 — quieter paper filmstrip */
+  background: linear-gradient(180deg, #e4e5e8, #d8d9dd); display: flex;
+  box-shadow: inset 0 0 0 0.5px rgba(26, 31, 46, 0.07);
   transition: box-shadow 0.14s ease-out;
 }
 .clip.hovered {
@@ -1330,19 +1392,34 @@ body.alt-cut .lanes { cursor: col-resize; }
   .workspace { grid-template-columns: 1fr; }
   .inspector { border-left: 0; border-top: 0.5px solid var(--line); min-height: 280px; }
   .editor { grid-template-rows: minmax(360px, 1fr) 220px; }
+  .home-lead { display: none; }
+  .home-topbar .brand-hero strong { font-size: 14px; }
   .home-stage {
     display: flex; flex-direction: column; align-items: stretch;
     justify-content: flex-start; gap: 18px;
     padding: 18px 14px 118px; overflow: auto;
   }
-  .home-copy { margin: 12px auto 0; }
-  .home-copy h1 { font-size: 28px; }
+  .home-stage-wash {
+    position: relative; width: min(100%, 520px); margin: 8px auto 0;
+    aspect-ratio: 16 / 10;
+  }
   .projects-drawer {
     position: static; width: auto; max-width: 520px; margin: 0 auto;
     bottom: auto; top: auto; right: auto; left: auto;
     max-height: min(240px, 38vh);
   }
-  .recorder-dock { bottom: 16px; width: min(100% - 24px, 420px); }
+  .recorder-dock {
+    position: fixed; left: 50%; top: auto; bottom: 16px;
+    transform: translateX(-50%);
+    width: min(100% - 24px, 420px);
+  }
+  .home-shell[data-enter="1"] .recorder-dock {
+    animation: softEnterDockMobile 0.52s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @keyframes softEnterDockMobile {
+    from { opacity: 0; transform: translateX(-50%) translateY(10px) scale(0.985); }
+    to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+  }
   .recorder-capsule {
     width: 100%; justify-content: space-between; padding: 0 6px;
     height: 52px;

@@ -27,7 +27,7 @@ const state = {
   cropOrigin: null,
   exportSheet: null,
   previewQuality: localStorage.getItem("dogsc-preview-quality") || "full",
-  inspectorWidth: Number(localStorage.getItem("dogsc-inspector-w") || 360),
+  inspectorWidth: Number(localStorage.getItem("dogsc-inspector-w") || 384),
   timelineHeight: Number(localStorage.getItem("dogsc-timeline-h") || 248),
   snapGuide: null,
   peaks: null,
@@ -709,22 +709,17 @@ function homeHtml() {
       </div>
     </div>`).join("");
   return `<div class="home-shell" data-enter="1">
-    <header class="topbar">
-      <div class="brand"><span class="logo" aria-hidden="true"></span><div><strong>DogSC</strong><em id="platform-pill">Linux</em></div></div>
-      <div class="top-center"></div>
+    <header class="topbar home-topbar">
+      <div class="brand brand-hero"><span class="logo" aria-hidden="true"></span><div><strong>DogSC</strong><em id="platform-pill">Linux</em></div></div>
+      <div class="top-center home-lead"><span>${t("lead")}</span></div>
       <div class="top-actions">
         <button class="btn ghost" id="lang">${t("lang")}</button>
+        <button class="btn primary" id="go-demo">${t("demo")}</button>
+        <label class="btn ghost">${t("import")}<input id="file" type="file" accept="video/*" hidden></label>
       </div>
     </header>
     <main class="home-stage">
-      <div class="home-copy">
-        <h1>DogSC</h1>
-        <p>${t("lead")}</p>
-        <div class="home-actions">
-          <button class="btn primary" id="go-demo">${t("demo")}</button>
-          <label class="btn">${t("import")}<input id="file" type="file" accept="video/*" hidden></label>
-        </div>
-      </div>
+      <div class="home-stage-wash" aria-hidden="true"></div>
       <aside class="projects-drawer island">
         <h2>${t("projects")}</h2>
         <div class="projects-list">${cards || `<p class="empty">${t("empty")}</p>`}</div>

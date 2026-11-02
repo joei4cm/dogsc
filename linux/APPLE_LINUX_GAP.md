@@ -53,4 +53,12 @@
 | Ubuntu Wayland 采集 | **xdg-desktop-portal + PipeWire**（已有）/ GTK4+GStreamer | 门户契合度最高 |
 | 指针轨迹 | **libinput** / portal remote desktop | 浏览器拿不到 CGEvent 级流 |
 
-**结论：** Web Soft Silver 已收齐可复刻 P1（含 G09/G13/G16/G17/G20 滞回、G23/G26、G28–G35）。P0 预览真相源 / continuous 圆角 / 浮动录制窗的**最优解**仍是 **Qt6-QML-Vulkan**（`linux/native/qt6`）；Web 用 `corner-shape: squircle` 作 continuous 过渡近似。
+**结论：** Web Soft Silver 已收齐可复刻 P1（含 G09/G13/G16/G17/G20 滞回、G23/G26、G28–G35）。首页录制岛为舞台主角（品牌进顶栏）；编辑器为 docked chrome + WorkspaceGrid + ≈10 画布 + 安静检查器 wells。P0 预览真相源 / continuous 圆角 / 浮动录制窗的**最优解**仍是 **Qt6-QML-Vulkan**（`linux/native/qt6`，已加深 docked 壳 / HUD / 录制 morph）；Web 用 `corner-shape: squircle` 作 continuous 过渡近似。
+
+## Oil Pro 视觉复拍（本轮）
+
+| 画面 | 路径 |
+|---|---|
+| 首页（录制岛 hero） | `.oil-ui/soft-silver-gap/hero-home/` |
+| 编辑器（docked chrome） | `.oil-ui/soft-silver-gap/hero-editor/` |
+| 诊断 | `.oil-ui/soft-silver-gap/diagnosis.md` |

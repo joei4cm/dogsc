@@ -21,9 +21,9 @@ ApplicationWindow {
     readonly property color bg: "#ecedef"
     readonly property color panel: "#fdfdfe"
     readonly property color platinum: "#1f1f1f"
-    readonly property color line: Qt.rgba(0.1, 0.12, 0.18, 0.075)
-    readonly property color muted: "#5c5c5c"
-    readonly property color faint: "#858585"
+    readonly property color line: Qt.rgba(0.1, 0.12, 0.18, 0.06)
+    readonly property color muted: "#4a4a4a"
+    readonly property color faint: "#5c5c5c"
     readonly property color well: Qt.rgba(0, 0, 0, 0.045)
 
     property real inspectorWidth: 384
@@ -33,22 +33,99 @@ ApplicationWindow {
     property int inspectorTab: 0
     property int timelineLane: 0
 
-    // Soft Silver stage + chrome
+    // Soft Silver stage + docked chrome (hairline, not floating dashboard islands)
     Item {
         anchors.fill: parent
+
+        // —— Top chrome bar ——
+        Rectangle {
+            id: topbar
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            height: 52
+            color: Qt.rgba(0.992, 0.992, 0.996, 0.86)
+            z: 4
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 0.5
+                color: root.line
+            }
+
+            Row {
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.left: parent.left
+                anchors.leftMargin: 14
+                spacing: 10
+                Rectangle {
+                    width: 22; height: 22; radius: 6
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "#f7f7f8" }
+                        GradientStop { position: 0.45; color: "#c8c8cc" }
+                        GradientStop { position: 1.0; color: "#5c5c60" }
+                    }
+                }
+                Column {
+                    spacing: 1
+                    Text {
+                        text: "DogSC"
+                        color: root.platinum
+                        font.pixelSize: 13
+                        font.weight: Font.DemiBold
+                    }
+                    Text {
+                        text: qsTr("Qt6 Soft Silver")
+                        color: root.faint
+                        font.pixelSize: 10
+                        font.weight: Font.Medium
+                    }
+                }
+            }
+
+            Row {
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.right: parent.right
+                anchors.rightMargin: 14
+                spacing: 8
+                Rectangle {
+                    width: exportLabel.implicitWidth + 22
+                    height: 30
+                    radius: 9
+                    color: root.platinum
+                    Text {
+                        id: exportLabel
+                        anchors.centerIn: parent
+                        text: qsTr("导出")
+                        color: "#ffffff"
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: root.exportOpen = true
+                    }
+                }
+            }
+        }
 
         // —— Stage ——
         Item {
             id: stage
             anchors.left: parent.left
             anchors.right: inspector.left
-            anchors.top: parent.top
+            anchors.top: topbar.bottom
             anchors.bottom: timeline.top
 
-            // Stage dots — Apple EditorWorkspaceGrid: stride 24, r0.6, α0.11
+            // Stage dots — Apple EditorWorkspaceGrid: stride 24, r0.6, α0.11 + dissolve
             Canvas {
                 id: stageDots
                 anchors.fill: parent
+                opacity: 1
+                layer.enabled: true
+                layer.smooth: true
                 onPaint: {
                     const ctx = getContext("2d")
                     ctx.clearRect(0, 0, width, height)
@@ -65,25 +142,25 @@ ApplicationWindow {
                 onHeightChanged: requestPaint()
             }
 
-            // Soft radial wash
+            // Soft radial wash — monitor atmosphere, not card glow
             Rectangle {
                 anchors.fill: parent
                 gradient: Gradient {
-                    GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.55) }
-                    GradientStop { position: 0.55; color: "transparent" }
-                    GradientStop { position: 1.0; color: Qt.rgba(0.1, 0.12, 0.18, 0.04) }
+                    GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.62) }
+                    GradientStop { position: 0.48; color: "transparent" }
+                    GradientStop { position: 1.0; color: Qt.rgba(0.1, 0.12, 0.18, 0.05) }
                 }
-                opacity: 0.9
+                opacity: 0.92
             }
 
-            // Canvas frame / preview placeholder
+            // Canvas frame / preview placeholder — continuous ≈10 monitor on stage
             Rectangle {
                 id: canvasFrame
-                width: Math.min(920, parent.width * 0.92)
+                width: Math.min(900, parent.width * 0.9)
                 height: width * 9 / 16
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.verticalCenter: parent.verticalCenter
-                anchors.verticalCenterOffset: root.cropping ? -18 : -8
+                anchors.verticalCenterOffset: root.cropping ? -22 : -14
                 radius: 10
                 color: "#111111"
                 border.color: Qt.rgba(1, 1, 1, 0.06)
@@ -158,62 +235,34 @@ ApplicationWindow {
                 }
             }
 
-            // Stage HUD — crop / export entry points
-            Row {
+            // Stage corner — crop only (export lives in top chrome)
+            Rectangle {
                 anchors.top: parent.top
                 anchors.right: parent.right
                 anchors.margins: 16
-                spacing: 8
+                width: cropHudLabel.implicitWidth + 28
+                height: 32
+                radius: 10
+                color: root.cropping ? root.platinum : root.panel
+                border.color: root.line
+                border.width: 0.5
                 z: 4
+                visible: !root.exportOpen
 
-                Rectangle {
-                    width: cropHudLabel.implicitWidth + 28
-                    height: 32
-                    radius: 10
-                    color: root.cropping ? root.platinum : root.panel
-                    border.color: root.line
-                    border.width: 0.5
-
-                    Text {
-                        id: cropHudLabel
-                        anchors.centerIn: parent
-                        text: qsTr("裁切")
-                        color: root.cropping ? "#fdfdfe" : root.platinum
-                        font.pixelSize: 12
-                        font.weight: Font.DemiBold
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: {
-                            root.cropping = !root.cropping
-                            if (root.cropping)
-                                root.exportOpen = false
-                        }
-                    }
+                Text {
+                    id: cropHudLabel
+                    anchors.centerIn: parent
+                    text: qsTr("裁切")
+                    color: root.cropping ? "#fdfdfe" : root.platinum
+                    font.pixelSize: 12
+                    font.weight: Font.DemiBold
                 }
-
-                Rectangle {
-                    width: exportHudLabel.implicitWidth + 28
-                    height: 32
-                    radius: 10
-                    color: root.panel
-                    border.color: root.line
-                    border.width: 0.5
-
-                    Text {
-                        id: exportHudLabel
-                        anchors.centerIn: parent
-                        text: qsTr("导出")
-                        color: root.platinum
-                        font.pixelSize: 12
-                        font.weight: Font.DemiBold
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: {
-                            root.exportOpen = true
-                            root.cropping = false
-                        }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        root.cropping = !root.cropping
+                        if (root.cropping)
+                            root.exportOpen = false
                     }
                 }
             }
@@ -292,22 +341,24 @@ ApplicationWindow {
             }
         }
 
-        // —— Inspector rail (Apple default 384, clamp 340–480) ——
+        // —— Inspector rail (docked chromeBar, Apple default 384, clamp 340–480) ——
         Rectangle {
             id: inspector
             anchors.right: parent.right
-            anchors.top: parent.top
+            anchors.top: topbar.bottom
             anchors.bottom: timeline.top
-            anchors.margins: 0
-            anchors.topMargin: 12
-            anchors.rightMargin: 12
-            anchors.bottomMargin: 8
             width: root.inspectorWidth
-            radius: 20
+            radius: 0
             color: root.panel
-            border.color: root.line
-            border.width: 0.5
             z: 3
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                width: 0.5
+                color: root.line
+            }
 
             // Drag resize handle between stage and inspector (340–480)
             Item {
@@ -321,16 +372,20 @@ ApplicationWindow {
                 Rectangle {
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.verticalCenter: parent.verticalCenter
-                    width: 3
+                    width: 2
                     height: 36
-                    radius: 1.5
-                    color: Qt.rgba(0.12, 0.12, 0.14, 0.18)
+                    radius: 1
+                    color: Qt.rgba(0.12, 0.12, 0.14, 0.16)
+                    opacity: resizeHandleMa.containsMouse || resizeHandleMa.pressed ? 1 : 0
+                    Behavior on opacity { NumberAnimation { duration: 120 } }
                 }
 
                 MouseArea {
+                    id: resizeHandleMa
                     anchors.fill: parent
                     anchors.leftMargin: -4
                     anchors.rightMargin: -4
+                    hoverEnabled: true
                     cursorShape: Qt.SizeHorCursor
                     property real startX: 0
                     property real startW: 0
@@ -354,15 +409,15 @@ ApplicationWindow {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.margins: 8
-                anchors.leftMargin: 14
+                anchors.leftMargin: 12
                 height: 44
                 spacing: 2
 
                 Repeater {
                     model: [qsTr("画面"), qsTr("开场"), qsTr("运镜"), qsTr("光标"), qsTr("摄像头"), qsTr("声音")]
                     delegate: Item {
-                        width: root.inspectorTab === index ? label.implicitWidth + 36 : 40
-                        height: 40
+                        width: root.inspectorTab === index ? label.implicitWidth + 36 : 36
+                        height: 36
                         Behavior on width {
                             NumberAnimation {
                                 duration: root.settleMs
@@ -371,7 +426,7 @@ ApplicationWindow {
                         }
                         Rectangle {
                             anchors.fill: parent
-                            radius: 20
+                            radius: 18
                             color: root.inspectorTab === index ? root.platinum : "transparent"
                             Behavior on color {
                                 ColorAnimation { duration: 150 }
@@ -382,7 +437,7 @@ ApplicationWindow {
                             anchors.centerIn: parent
                             text: modelData
                             color: root.inspectorTab === index ? "white" : root.muted
-                            font.pixelSize: 13
+                            font.pixelSize: 12
                             font.weight: Font.DemiBold
                             opacity: root.inspectorTab === index ? 1 : 0
                             Behavior on opacity {
@@ -397,27 +452,70 @@ ApplicationWindow {
                 }
             }
 
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                anchors.verticalCenter: parent.verticalCenter
-                width: parent.width - 36
-                wrapMode: Text.WordWrap
-                horizontalAlignment: Text.AlignHCenter
-                color: root.muted
-                font.pixelSize: 12
-                text: qsTr("Qt 6 Soft Silver host — PreviewSurface + Vulkan next.\nPython ffmpeg backends stay as the capture/export sidecar.\nInspector %1 px (340–480).")
-                    .arg(Math.round(root.inspectorWidth))
+            Rectangle {
+                anchors.top: rail.bottom
+                anchors.topMargin: 8
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.margins: 12
+                height: 0.5
+                color: root.line
+            }
+
+            // Quiet cardFill wells — Soft Silver inspector density
+            Column {
+                anchors.top: rail.bottom
+                anchors.topMargin: 20
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.margins: 14
+                spacing: 10
+
+                Rectangle {
+                    width: parent.width
+                    height: 88
+                    radius: 12
+                    color: root.well
+                    Column {
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        spacing: 6
+                        Text {
+                            text: qsTr("背景")
+                            color: root.faint
+                            font.pixelSize: 11
+                            font.weight: Font.DemiBold
+                        }
+                        Text {
+                            width: parent.width
+                            wrapMode: Text.WordWrap
+                            text: qsTr("cardFill wells · platinum captions · no marketing CTA")
+                            color: root.muted
+                            font.pixelSize: 12
+                        }
+                    }
+                }
+
+                Text {
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    horizontalAlignment: Text.AlignLeft
+                    color: root.faint
+                    font.pixelSize: 11
+                    text: qsTr("PreviewSurface + Vulkan next · Inspector %1 px")
+                        .arg(Math.round(root.inspectorWidth))
+                }
             }
         }
 
-        // —— Timeline strip ——
+        // —— Timeline strip (flush chrome, hairline only) ——
         Rectangle {
             id: timeline
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
-            height: 168
-            color: "#f6f6f8"
+            height: 176
+            color: root.panel
             border.color: root.line
             border.width: 0
             z: 2
@@ -437,7 +535,7 @@ ApplicationWindow {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 height: 40
-                color: Qt.rgba(0.992, 0.992, 0.996, 0.92)
+                color: root.panel
 
                 Row {
                     anchors.verticalCenter: parent.verticalCenter
@@ -633,12 +731,72 @@ ApplicationWindow {
             }
         }
 
+        // Stage HUD — regularMaterial pill over media (web Soft Silver parity)
+        Rectangle {
+            id: stageHud
+            anchors.horizontalCenter: stage.horizontalCenter
+            anchors.bottom: stage.bottom
+            anchors.bottomMargin: 14
+            width: hudRow.implicitWidth + 14
+            height: 40
+            radius: 20
+            color: Qt.rgba(0.992, 0.992, 0.996, 0.86)
+            border.color: root.line
+            border.width: 0.5
+            z: 7
+            visible: !root.cropping && !root.exportOpen && !root.recording
+
+            Row {
+                id: hudRow
+                anchors.centerIn: parent
+                spacing: 2
+                Repeater {
+                    model: ["16:9", "⊡", "＋", "－"]
+                    delegate: Rectangle {
+                        width: 34; height: 34; radius: 17
+                        color: "transparent"
+                        Text {
+                            anchors.centerIn: parent
+                            text: modelData
+                            color: root.muted
+                            font.pixelSize: 11
+                            font.weight: Font.Medium
+                        }
+                    }
+                }
+                Rectangle {
+                    width: 1; height: 18
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: root.line
+                }
+                Rectangle {
+                    width: 34; height: 34; radius: 17
+                    color: root.platinum
+                    Text {
+                        anchors.centerIn: parent
+                        text: "▶"
+                        color: "#ffffff"
+                        font.pixelSize: 11
+                    }
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "00:00.00 / 00:04.00"
+                    color: root.platinum
+                    font.pixelSize: 12
+                    font.family: "ui-monospace"
+                    leftPadding: 6
+                    rightPadding: 6
+                }
+            }
+        }
+
         // Floating Soft Silver recorder capsule — idle↔live morph (G03 stub)
         Rectangle {
             id: capsule
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.bottom: timeline.top
-            anchors.bottomMargin: 14
+            anchors.bottomMargin: 18
             height: 56
             width: root.recording ? 168 : (modeLabel.implicitWidth + 220)
             radius: 28
@@ -659,6 +817,17 @@ ApplicationWindow {
                     duration: root.settleMs
                     easing.type: Easing.OutCubic
                 }
+            }
+
+            // Soft island shadow plate under capsule
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: -2
+                radius: 30
+                color: "transparent"
+                border.width: 0
+                z: -1
+                opacity: 0.001
             }
 
             RowLayout {
@@ -701,13 +870,22 @@ ApplicationWindow {
 
                 Rectangle {
                     width: 36; height: 36; radius: 18
-                    color: "#ff453b"
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "#ff6b63" }
+                        GradientStop { position: 1.0; color: "#ff453b" }
+                    }
                     Rectangle {
-                        width: root.recording ? 12 : 12
-                        height: root.recording ? 12 : 12
+                        width: 12
+                        height: 12
                         radius: root.recording ? 3 : 6
                         anchors.centerIn: parent
                         color: "white"
+                        Behavior on radius {
+                            NumberAnimation {
+                                duration: root.morphMs
+                                easing.type: Easing.OutCubic
+                            }
+                        }
                     }
                     MouseArea {
                         anchors.fill: parent
