@@ -50,7 +50,15 @@ from dogsc.project import (
     undo,
 )
 from dogsc.recorder import Recorder, pick_region_for
-from dogsc.sources import list_hypr_monitors, list_hypr_windows, list_x11_windows, list_xrandr
+from dogsc.sources import (
+    list_cameras,
+    list_hypr_monitors,
+    list_hypr_windows,
+    list_phones,
+    list_x11_windows,
+    list_xrandr,
+    phone_capabilities,
+)
 from dogsc.timeline import add_manual_zoom, clip_at, delete_clip, move_clip, set_speed, split_clip, trim_clip
 from dogsc.zoom import new_id, plan_auto_zooms
 
@@ -189,6 +197,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"events": load_pointer(project_id)})
         if tail == "media":
             return self._range(media_path(project_id), "video/mp4")
+        if tail == "camera" or tail == "media/camera":
+            target = project_dir(project_id) / "camera.mp4"
+            if not target.is_file():
+                return self._error(404, "这个项目没有摄像头轨。")
+            return self._range(target, "video/mp4")
         if tail.startswith("thumbs/"):
             name = Path(tail.split("/", 1)[1]).name
             target = project_dir(project_id) / "thumbs" / name
@@ -494,13 +507,24 @@ def _sources() -> dict:
     else:
         displays = list_xrandr()
         windows = list_x11_windows() if desktop.session == "x11" or desktop.backend == "x11" else []
+    cameras = list_cameras()
+    phones = list_phones()
+    caps = phone_capabilities()
     return {
         "displays": displays,
         "windows": windows,
+        "cameras": cameras,
+        "phones": phones,
         "microphone": desktop.microphone,
         "system_audio": desktop.system_audio,
         "backend": desktop.backend,
         "region": desktop.session == "x11" or desktop.backend in {"x11", "hyprland"},
+        "capabilities": {
+            **caps,
+            "screen": bool(desktop.backend),
+            "camera": bool(cameras) or bool(caps.get("v4l2")),
+            "phone": bool(phones) or bool(caps.get("adb")) or bool(caps.get("idevice")),
+        },
     }
 
 

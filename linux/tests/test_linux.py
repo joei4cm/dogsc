@@ -13,7 +13,7 @@ import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from dogsc.export_plan import build_export, canvas_size, estimate_export, preview_sample
+from dogsc.export_plan import build_export, camera_pip_layout, canvas_size, estimate_export, preview_sample
 from dogsc.media import probe
 from dogsc.model import clamp_crop, migrate
 from dogsc.platform import Toolchain, choose_backend, classify_audio, family_of, parse_os_release, parse_pactl_sources, session_of
@@ -21,7 +21,18 @@ from dogsc.portal import parse_node_id
 from dogsc.project import import_media
 from dogsc.recorder import Recorder
 from dogsc.server import Handler, _ffmpeg_failure, create_demo
-from dogsc.sources import hyprland_record_command, parse_hypr_clients, parse_hypr_monitors, parse_xrandr, portal_ffmpeg_command, x11_record_command
+from dogsc.sources import (
+    camera_record_command,
+    hyprland_record_command,
+    parse_adb_devices,
+    parse_hypr_clients,
+    parse_hypr_monitors,
+    parse_idevice_list,
+    parse_v4l2_ctl_list,
+    parse_xrandr,
+    portal_ffmpeg_command,
+    x11_record_command,
+)
 from dogsc.timeline import delete_clip, move_clip, split_clip, trim_clip
 from dogsc.zoom import plan_auto_zooms, sample, viewport
 from http.server import ThreadingHTTPServer
@@ -86,6 +97,29 @@ class CaptureCommandTests(unittest.TestCase):
     def test_portal_node_parser(self):
         self.assertEqual(parse_node_id([(7, {"size": (100, 100)})]), 7)
         self.assertEqual(parse_node_id([{"node_id": 9}]), 9)
+
+    def test_camera_and_phone_parsers(self):
+        cameras = parse_v4l2_ctl_list(
+            "HD Webcam (usb-0000:00:14.0-1):\n\t/dev/video0\n\t/dev/video1\n"
+            "Virtual Camera:\n\t/dev/video2\n"
+        )
+        self.assertEqual(cameras[0]["path"], "/dev/video0")
+        self.assertEqual(cameras[0]["name"], "HD Webcam")
+        self.assertEqual(len(cameras), 2)
+        command = camera_record_command("/dev/video0", 30, [], "/tmp/cam.mp4")
+        self.assertIn("v4l2", command)
+        self.assertIn("/dev/video0", command)
+        phones = parse_adb_devices(
+            "List of devices attached\n"
+            "emulator-5554 device product:sdk_gphone model:Pixel_6 device:generic\n"
+            "offline-1 offline\n"
+        )
+        self.assertEqual(phones[0]["serial"], "emulator-5554")
+        self.assertEqual(phones[0]["platform"], "android")
+        self.assertIn("Pixel", phones[0]["name"])
+        ios = parse_idevice_list("00008030-001A1D123456789A\n")
+        self.assertEqual(ios[0]["platform"], "ios")
+        self.assertFalse(ios[0]["ready"])
 
 
 class CropModelTests(unittest.TestCase):
@@ -235,6 +269,50 @@ class ExportTests(unittest.TestCase):
             args=["ffmpeg"], returncode=1, stdout="", stderr=warning + "\nError when evaluating the expression",
         )
         self.assertIn("expression", _ffmpeg_failure(failed))
+
+    def test_camera_pip_export_overlay(self):
+        layout = camera_pip_layout(
+            {"shape": "circle", "size": 0.2, "x": 0.8, "y": 0.8},
+            1000, 600,
+        )
+        self.assertEqual(layout["shape"], "circle")
+        self.assertEqual(layout["w"], layout["h"])
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "in.mp4"
+            camera = root / "camera.mp4"
+            for target in (source, camera):
+                subprocess.run([
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "-f", "lavfi", "-i", "testsrc=size=320x180:rate=30:duration=0.6",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", str(target),
+                ], check=True)
+            project = migrate({
+                "id": "cam-export",
+                "clips": [{"id": "c", "src_in": 0, "src_out": 0.6, "speed": 1}],
+                "canvas": {"aspect": "16:9", "padding": 0.06, "radius": 0, "shadow": 0, "background": "#111"},
+                "export": {"resolution": "source", "fps": 30},
+                "media": {"width": 320, "height": 180, "has_audio": False, "duration": 0.6, "fps": 30},
+                "camera": {
+                    "enabled": True, "media": "camera.mp4", "shape": "circle",
+                    "size": 0.25, "x": 0.82, "y": 0.78, "mirror": True, "border": 2,
+                },
+                "zooms": [], "screen_motions": [], "mosaics": [], "stickers": [],
+                "draw_cursor": False, "capture": {"cursor_baked": True},
+            })
+            # build_export resolves camera next to media path
+            media = root / "media.mp4"
+            source.replace(media)
+            camera.replace(root / "camera.mp4")
+            output = root / "out.mp4"
+            command = build_export(project, media, [], output, root / "work")
+            graph = command[command.index("-filter_complex") + 1]
+            self.assertIn("campip", graph)
+            self.assertIn("withcam", graph)
+            self.assertIn(str(root / "camera.mp4"), command)
+            completed = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertTrue(output.is_file())
 
 
 class ServerTests(unittest.TestCase):
