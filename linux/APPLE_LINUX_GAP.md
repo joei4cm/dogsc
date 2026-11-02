@@ -80,4 +80,5 @@
 | 编辑器（docked chrome） | `.oil-ui/soft-silver-gap/hero-editor/` |
 | Apple parity 基线 | `.oil-ui/apple-parity/` |
 | 倒计时 / 标记 / 焦点虚化 | `.oil-ui/apple-parity-polish/` |
+| 开场顺序 / 导出选区 / QW | `.oil-ui/apple-parity-polish/{opening-order,export-scope,shortcuts-qw}/` |
 | 诊断 | `.oil-ui/apple-parity-polish/diagnosis.md` |

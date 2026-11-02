@@ -9,4 +9,5 @@
 5. 【已落地】导出 kind（视频/仅音频）+ scope（整段/选区）、时间线多选批量删、Q/W trim、效果属性剪贴板。
 6. 【路径】G52 场景预设；真 continuous / Metal → Qt6。
 
-截图：`home` `countdown` `editor` `focus` `camera` `opening` `audio`（本轮续拍见 `opening-order` / `export-scope`）
+截图：`home` `countdown` `editor` `focus` `camera` `opening` `audio`  
+本轮续拍：`opening-order` `export-scope` `shortcuts-qw`
