@@ -14,12 +14,16 @@ class Toolchain:
     ffprobe: bool = False
     x11grab: bool = False
     ffmpeg_pipewire: bool = False
+    v4l2: bool = False
     pactl: bool = False
     wf_recorder: bool = False
     slurp: bool = False
     hyprctl: bool = False
     gst_pipewire: bool = False
     portal: bool = False
+    adb: bool = False
+    scrcpy: bool = False
+    idevice: bool = False
 
     def as_dict(self) -> dict[str, bool]:
         return asdict(self)
@@ -45,6 +49,13 @@ class Desktop:
         payload["tools"] = self.tools.as_dict()
         payload["backend_label"] = backend_label(self.backend, self.family, self.compositor)
         payload["parity"] = matrix()
+        payload["inputs"] = {
+            "screen": bool(self.backend),
+            "camera": bool(self.tools.v4l2),
+            "android": bool(self.tools.adb),
+            "android_mirror": bool(self.tools.scrcpy),
+            "ios_detect": bool(self.tools.idevice),
+        }
         return payload
 
 
@@ -168,6 +179,14 @@ def explain(desktop: Desktop) -> list[str]:
         hints.append("没有找到系统声音的监听源。PipeWire 或 PulseAudio 就绪后可以同时录系统声音和麦克风。")
     if desktop.family == "omarchy" and desktop.backend != "hyprland" and desktop.session != "wayland":
         hints.append("Omarchy 通常运行在 Hyprland 上。当前会话不是 Wayland，录制会退回到能用的捕获方式。")
+    if desktop.tools.v4l2:
+        hints.append("本机 V4L2 摄像头可作为主画面，或在录屏时作为画中画副轨。")
+    if desktop.tools.adb and not desktop.tools.scrcpy:
+        hints.append("已检测到 adb。安装 scrcpy 可获得更稳的 Android 手机投屏录制；否则使用 adb screenrecord。")
+    elif desktop.tools.scrcpy:
+        hints.append("Android 手机可通过 scrcpy 录制屏幕。")
+    if desktop.tools.idevice:
+        hints.append("已检测到 iOS 设备（libimobiledevice）。Linux 无 Continuity；若 iPhone 以 UVC 摄像头出现，请选摄像头源。")
     return hints
 
 
@@ -244,12 +263,16 @@ def detect_toolchain(device_text: str | None = None) -> Toolchain:
         ffprobe=command_exists("ffprobe"),
         x11grab=bool(re.search(r"\bx11grab\b", devices)),
         ffmpeg_pipewire=bool(re.search(r"\bpipewire\b", devices)),
+        v4l2=bool(re.search(r"\bv4l2\b", devices)) or Path("/sys/class/video4linux").is_dir(),
         pactl=command_exists("pactl"),
         wf_recorder=command_exists("wf-recorder"),
         slurp=command_exists("slurp"),
         hyprctl=command_exists("hyprctl"),
         gst_pipewire=gstreamer_has_pipewire(),
         portal=portal_is_running(),
+        adb=command_exists("adb"),
+        scrcpy=command_exists("scrcpy"),
+        idevice=command_exists("idevice_id"),
     )
 
 

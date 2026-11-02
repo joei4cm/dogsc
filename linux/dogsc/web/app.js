@@ -17,8 +17,20 @@ const state = {
   bgTab: "wallpaper",
   motionMode: "zoom",
   motionDrive: "auto",
-  record: { source: "display", display: 0, window: null, geometry: null, fps: 30, mic: false, system: false, camera: false },
-  sources: { displays: [], windows: [] },
+  record: {
+    source: "display",
+    display: 0,
+    window: null,
+    geometry: null,
+    fps: 30,
+    mic: false,
+    system: false,
+    camera: false,
+    cameraDevice: null,
+    phoneId: null,
+    phonePlatform: null,
+  },
+  sources: { displays: [], windows: [], cameras: [], phones: [], capabilities: {} },
   recording: { active: false, elapsed: 0 },
   recorderPopover: null,
   hudMenu: null,
@@ -180,6 +192,7 @@ const ICONS = {
   display: `<svg class="icon-svg" viewBox="0 0 18 18"><rect x="1.5" y="2.5" width="15" height="10" rx="2.4"/><path d="M6 15.6h6"/></svg>`,
   window: `<svg class="icon-svg" viewBox="0 0 18 18"><rect x="1.5" y="3" width="15" height="12" rx="2.6"/><path d="M4.6 6.2h2.8"/></svg>`,
   region: `<svg class="icon-svg" viewBox="0 0 18 18"><path d="M3 6V4.5A1.5 1.5 0 0 1 4.5 3H6M12 3h1.5A1.5 1.5 0 0 1 15 4.5V6M15 12v1.5a1.5 1.5 0 0 1-1.5 1.5H12M6 15H4.5A1.5 1.5 0 0 1 3 13.5V12"/></svg>`,
+  phone: `<svg class="icon-svg" viewBox="0 0 18 18"><rect x="5" y="1.8" width="8" height="14.4" rx="2"/><path d="M8 13.8h2"/></svg>`,
   mic: `<svg class="icon-svg" viewBox="0 0 18 18"><rect x="6.5" y="2.5" width="5" height="9" rx="2.5"/><path d="M4.5 9a4.5 4.5 0 0 0 9 0M9 13.5V16"/></svg>`,
   micOff: `<svg class="icon-svg" viewBox="0 0 18 18"><rect x="6.5" y="2.5" width="5" height="9" rx="2.5"/><path d="M4.5 9a4.5 4.5 0 0 0 9 0M9 13.5V16M3.5 3.5l11 11"/></svg>`,
   cam: `<svg class="icon-svg" viewBox="0 0 18 18"><rect x="2" y="5" width="10" height="8" rx="1.8"/><path d="M12.5 8l3.5-2v6l-3.5-2z"/></svg>`,
@@ -224,7 +237,7 @@ const STR = {
   zh: {
     lang: "English",
     title: "录得清楚，剪得轻松。",
-    lead: "录显示器、窗口或区域，再在 Soft Silver 时间线上剪辑与运镜。",
+    lead: "录显示器、窗口、摄像头或手机，再在 Soft Silver 时间线上剪辑与运镜。",
     record: "开始录制",
     demo: "打开示例",
     import: "导入视频",
@@ -234,6 +247,7 @@ const STR = {
     display: "显示器",
     window: "窗口",
     region: "区域",
+    phone: "手机",
     mic: "麦克风",
     system: "系统声音",
     pick: "框选区域",
@@ -254,6 +268,13 @@ const STR = {
     cursor: "光标",
     camera: "摄像头",
     audio: "声音",
+    noCamera: "没有检测到摄像头（V4L2）。",
+    noPhone: "没有检测到手机。Android 需 adb/scrcpy；iPhone Continuity 仅 macOS。",
+    cameraPip: "录屏时一并收录摄像头画中画",
+    phoneAndroid: "Android",
+    phoneIos: "iPhone / iPad",
+    phoneIosBlocked: "Linux 无法有线录 iPhone 屏幕。若以 UVC 摄像头出现，请改选「摄像头」。",
+    phoneNeedScrcpy: "未安装 scrcpy，将使用 adb screenrecord（功能较简）。",
     background: "背景",
     layout: "布局",
     mockup: "样机",
@@ -285,7 +306,7 @@ const STR = {
     addSticker: "上传贴图",
     playing: "播放",
     pause: "暂停",
-    note: "iPhone 有线采集仍依赖 macOS Continuity。摄像头画中画可在导入摄像头素材后使用；本机 v4l2 设备会出现在录制胶囊。",
+    note: "摄像头走本机 V4L2；Android 推荐 scrcpy/adb；iPhone Continuity 仅 macOS，Linux 上若呈 UVC 设备可选摄像头源。",
     noDisplay: "没有列出显示器。",
     noWindow: "没有列出窗口。",
     delete: "删除",
@@ -311,7 +332,7 @@ const STR = {
   en: {
     lang: "中文",
     title: "Record clearly. Cut lightly.",
-    lead: "Capture a display, window, or region — then cut and zoom on Soft Silver.",
+    lead: "Capture a display, window, camera, or phone — then cut and zoom on Soft Silver.",
     record: "Record",
     demo: "Open example",
     import: "Import video",
@@ -321,6 +342,7 @@ const STR = {
     display: "Display",
     window: "Window",
     region: "Region",
+    phone: "Phone",
     mic: "Microphone",
     system: "System audio",
     pick: "Drag a region",
@@ -341,6 +363,13 @@ const STR = {
     cursor: "Cursor",
     camera: "Camera",
     audio: "Audio",
+    noCamera: "No V4L2 camera detected.",
+    noPhone: "No phone detected. Android needs adb/scrcpy; iPhone Continuity is macOS-only.",
+    cameraPip: "Also record camera PiP while capturing the screen",
+    phoneAndroid: "Android",
+    phoneIos: "iPhone / iPad",
+    phoneIosBlocked: "Linux cannot cable-record iPhone screens. If it appears as a UVC camera, choose Camera.",
+    phoneNeedScrcpy: "scrcpy missing — falling back to adb screenrecord.",
     background: "Background",
     layout: "Layout",
     mockup: "Mockup",
@@ -372,7 +401,7 @@ const STR = {
     addSticker: "Upload sticker",
     playing: "Play",
     pause: "Pause",
-    note: "Cable iPhone capture still needs macOS Continuity. Camera PiP works after importing camera media; local v4l2 devices appear on the recorder capsule.",
+    note: "Cameras use local V4L2. Android prefers scrcpy/adb. iPhone Continuity is macOS-only; on Linux pick Camera if it shows up as UVC.",
     noDisplay: "No displays listed.",
     noWindow: "No windows listed.",
     delete: "Delete",
@@ -609,6 +638,14 @@ function render(options = {}) {
 }
 
 function sourceLabel(kind) {
+  if (kind === "camera") {
+    const cam = (state.sources.cameras || []).find((item) => item.id === state.record.cameraDevice);
+    return cam?.name || t("camera");
+  }
+  if (kind === "phone") {
+    const phone = (state.sources.phones || []).find((item) => item.id === state.record.phoneId);
+    return phone?.name || t("phone");
+  }
   return t(kind === "region" ? "region" : kind);
 }
 
@@ -639,13 +676,32 @@ function recorderCapsuleHtml() {
       <button class="choice ${window.id === state.record.window && source === "window" ? "active" : ""}" data-window="${escapeHtml(window.id)}">
         ${escapeHtml(window.title)}
       </button>`).join("") || `<p class="note">${t("noWindow")}</p>`;
+    const cameras = (state.sources.cameras || []).map((camera) => `
+      <button class="choice ${camera.id === state.record.cameraDevice && source === "camera" ? "active" : ""}" data-camera="${escapeHtml(camera.id)}">
+        ${escapeHtml(camera.name)} <em class="meta">${escapeHtml(camera.path || camera.id)}</em>
+      </button>`).join("") || `<p class="note">${t("noCamera")}</p>`;
+    const phones = (state.sources.phones || []).map((phone) => {
+      const blocked = phone.platform === "ios" && phone.ready === false;
+      return `<button class="choice ${phone.id === state.record.phoneId && source === "phone" ? "active" : ""} ${blocked ? "is-blocked" : ""}" data-phone="${escapeHtml(phone.id)}" data-platform="${escapeHtml(phone.platform || "")}" ${blocked ? "disabled" : ""}>
+        <strong>${escapeHtml(phone.name)}</strong>
+        <span class="meta">${phone.platform === "ios" ? t("phoneIos") : t("phoneAndroid")} · ${escapeHtml(phone.transport || "")}</span>
+      </button>`;
+    }).join("") || `<p class="note">${t("noPhone")}</p>`;
+    const phoneHint = source === "phone"
+      ? `<p class="note">${(state.sources.capabilities || {}).scrcpy ? t("note") : t("phoneNeedScrcpy")}</p>
+         <p class="note">${t("phoneIosBlocked")}</p>`
+      : "";
+    const body = source === "display" ? displays
+      : source === "window" ? windows
+      : source === "camera" ? cameras
+      : source === "phone" ? `${phones}${phoneHint}`
+      : `<p class="note">${state.record.geometry ? `${state.record.geometry.width}×${state.record.geometry.height}` : ""}</p>
+        <button class="btn" id="pick-region">${t("pick")}</button>`;
     popover = `<div class="recorder-popover island" id="rec-pop">
-      <div class="segmented" style="margin-bottom:10px">
-        ${["display", "window", "region"].map((kind) => `<button data-source="${kind}" class="${source === kind ? "active" : ""}">${t(kind)}</button>`).join("")}
+      <div class="segmented source-segmented" style="margin-bottom:10px">
+        ${["display", "window", "region", "camera", "phone"].map((kind) => `<button data-source="${kind}" class="${source === kind ? "active" : ""}">${t(kind)}</button>`).join("")}
       </div>
-      <div class="choices">${source === "display" ? displays : source === "window" ? windows : `
-        <p class="note">${state.record.geometry ? `${state.record.geometry.width}×${state.record.geometry.height}` : ""}</p>
-        <button class="btn" id="pick-region">${t("pick")}</button>`}</div>
+      <div class="choices">${body}</div>
     </div>`;
   } else if (pop === "mic") {
     popover = `<div class="recorder-popover island narrow" id="rec-pop">
@@ -654,9 +710,16 @@ function recorderCapsuleHtml() {
       <p class="note">${state.env?.microphone ? "" : (state.lang === "zh" ? "当前环境未检测到麦克风。" : "No microphone detected.")}</p>
     </div>`;
   } else if (pop === "camera") {
-    popover = `<div class="recorder-popover island narrow" id="rec-pop">
+    const cameras = state.sources.cameras || [];
+    const options = cameras.map((camera) => `
+      <button class="choice ${camera.id === state.record.cameraDevice ? "active" : ""}" data-camera="${escapeHtml(camera.id)}">
+        ${escapeHtml(camera.name)}
+      </button>`).join("") || `<p class="note">${t("noCamera")}</p>`;
+    const screenPip = !["camera", "phone"].includes(state.record.source);
+    popover = `<div class="recorder-popover island" id="rec-pop">
       <div class="section-title">${t("camera")}</div>
-      <label class="row"><input type="checkbox" id="rec-camera" ${state.record.camera ? "checked" : ""}> ${t("camera")}</label>
+      ${screenPip ? `<label class="row"><input type="checkbox" id="rec-camera" ${state.record.camera ? "checked" : ""} ${cameras.length ? "" : "disabled"}> ${t("cameraPip")}</label>` : `<p class="note">${state.lang === "zh" ? "当前源已是摄像头 / 手机。" : "Camera/phone is already the primary source."}</p>`}
+      <div class="choices" style="margin-top:8px">${options}</div>
       <p class="note">${t("note")}</p>
     </div>`;
   } else if (pop === "system") {
@@ -1098,8 +1161,12 @@ function cursorInspector() {
 
 function cameraInspector() {
   const camera = state.project.camera || {};
+  const mediaNote = camera.media
+    ? (state.lang === "zh" ? `已收录摄像头轨：${camera.media}` : `Recorded camera track: ${camera.media}`)
+    : (state.lang === "zh" ? "预览优先用本机摄像头；录制时可勾选画中画副轨。" : "Live preview uses the local camera; enable PiP during capture to record a sidecar.");
   return `
     <h2>${t("camera")}</h2>
+    <p class="note">${escapeHtml(mediaNote)}</p>
     <label class="row"><input id="camera-enabled" type="checkbox" ${camera.enabled ? "checked" : ""}> 显示摄像头</label>
     <label class="field">形状<select id="camera-shape">${options(["circle","square","horizontal","vertical","original"], camera.shape || "circle", { circle: "圆形", square: "方形", horizontal: "横向", vertical: "纵向", original: "原始比例" })}</select></label>
     <label class="field">大小<input id="camera-size" type="range" min="0.1" max="0.45" step="0.01" value="${camera.size || 0.22}"></label>
@@ -1200,12 +1267,23 @@ function bindHome() {
   document.querySelectorAll("[data-pop]").forEach((node) => node.onclick = async () => {
     const id = node.dataset.pop;
     state.recorderPopover = state.recorderPopover === id ? null : id;
-    if (id === "source") await loadSources();
+    if (id === "source" || id === "camera") await loadSources();
     render();
   });
   document.querySelectorAll("[data-source]").forEach((node) => node.onclick = () => {
     state.record.source = node.dataset.source;
     if (node.dataset.source === "region") state.recorderPopover = "source";
+    if (node.dataset.source === "camera" && !state.record.cameraDevice) {
+      state.record.cameraDevice = state.sources.cameras?.[0]?.id || null;
+    }
+    if (node.dataset.source === "phone" && !state.record.phoneId) {
+      const ready = (state.sources.phones || []).find((item) => item.platform === "android" && item.ready !== false);
+      if (ready) {
+        state.record.phoneId = ready.id;
+        state.record.phonePlatform = ready.platform;
+      }
+    }
+    if (["camera", "phone"].includes(node.dataset.source)) state.record.camera = false;
     render();
   });
   document.querySelectorAll("[data-display]").forEach((node) => node.onclick = () => {
@@ -1218,6 +1296,19 @@ function bindHome() {
     state.record.source = "window";
     state.record.window = node.dataset.window;
     state.recorderPopover = null;
+    render();
+  });
+  document.querySelectorAll("[data-camera]").forEach((node) => node.onclick = () => {
+    state.record.cameraDevice = node.dataset.camera;
+    if (state.recorderPopover === "source") state.record.source = "camera";
+    render();
+  });
+  document.querySelectorAll("[data-phone]").forEach((node) => node.onclick = () => {
+    if (node.disabled) return;
+    state.record.source = "phone";
+    state.record.phoneId = node.dataset.phone;
+    state.record.phonePlatform = node.dataset.platform || "android";
+    state.record.camera = false;
     render();
   });
   const mic = document.querySelector("#mic");
@@ -1693,6 +1784,19 @@ async function loadSources() {
 
 async function startRecording() {
   try {
+    if (state.record.source === "camera" && !state.record.cameraDevice) {
+      await loadSources();
+      state.record.cameraDevice = state.sources.cameras?.[0]?.id || null;
+      if (!state.record.cameraDevice) throw new Error(t("noCamera"));
+    }
+    if (state.record.source === "phone") {
+      if (!state.record.phoneId) throw new Error(t("noPhone"));
+      if (state.record.phonePlatform === "ios") throw new Error(t("phoneIosBlocked"));
+    }
+    if (state.record.camera && !state.record.cameraDevice) {
+      await loadSources();
+      state.record.cameraDevice = state.sources.cameras?.[0]?.id || null;
+    }
     state.recorderPopover = null;
     state.recording = await api("/api/record/start", { method: "POST", body: {
       source: state.record.source,
@@ -1702,6 +1806,10 @@ async function startRecording() {
       fps: state.record.fps,
       microphone: state.record.mic,
       system_audio: state.record.system,
+      camera: state.record.camera && !["camera", "phone"].includes(state.record.source),
+      camera_device: state.record.cameraDevice,
+      phone_id: state.record.phoneId,
+      phone_platform: state.record.phonePlatform,
     }});
     state.view = "home";
     render();
@@ -2239,14 +2347,33 @@ async function ensureCameraPip() {
     if (state.cameraStream) {
       state.cameraStream.getTracks().forEach((track) => track.stop());
       state.cameraStream = null;
-      video.srcObject = null;
     }
+    video.srcObject = null;
+    video.removeAttribute("src");
+    return;
+  }
+  // Prefer recorded camera sidecar from the capture session.
+  if (cam.media && state.project?.id) {
+    if (state.cameraStream) {
+      state.cameraStream.getTracks().forEach((track) => track.stop());
+      state.cameraStream = null;
+    }
+    video.srcObject = null;
+    const url = `/api/projects/${state.project.id}/camera`;
+    if (video.dataset.cameraSrc !== url) {
+      video.dataset.cameraSrc = url;
+      video.src = url;
+    }
+    video.play().catch(() => {});
     return;
   }
   if (!navigator.mediaDevices?.getUserMedia) return;
   try {
     if (!state.cameraStream) {
-      state.cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      const constraints = cam.device
+        ? { video: { deviceId: { ideal: cam.device } }, audio: false }
+        : { video: true, audio: false };
+      state.cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
     }
     video.srcObject = state.cameraStream;
     video.play().catch(() => {});

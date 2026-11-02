@@ -16,10 +16,16 @@ from dogsc.platform import Desktop, detect
 from dogsc.portal import PortalCast
 from dogsc.project import new_project, project_dir, projects_dir, save
 from dogsc.sources import (
+    android_adb_screenrecord_command,
+    android_scrcpy_command,
     audio_sidecar_command,
+    camera_record_command,
+    camera_sidecar_command,
     hyprland_record_command,
+    list_cameras,
     list_hypr_monitors,
     list_hypr_windows,
+    list_phones,
     list_x11_windows,
     list_xrandr,
     mux_command,
@@ -37,6 +43,7 @@ class Recorder:
         self._lock = threading.Lock()
         self._video: subprocess.Popen | None = None
         self._audio: subprocess.Popen | None = None
+        self._camera: subprocess.Popen | None = None
         self._sampler: PointerSampler | None = None
         self._portal: PortalCast | None = None
         self._started = 0.0
@@ -69,12 +76,16 @@ class Recorder:
                 raise DogSCError("已经有一条录制在进行。")
             self.error = None
             desktop = desktop or detect()
-            if desktop.backend is None:
-                detail = desktop.hints[0] if desktop.hints else "这台电脑还不能录屏。"
-                raise DogSCError(detail)
-            backend = str(request.get("backend") or desktop.backend)
-            if request.get("backend") and request["backend"] != desktop.backend:
-                backend = str(request["backend"])
+            source = str(request.get("source") or "display")
+            if source in {"camera", "phone"}:
+                backend = source
+            else:
+                if desktop.backend is None:
+                    detail = desktop.hints[0] if desktop.hints else "这台电脑还不能录屏。"
+                    raise DogSCError(detail)
+                backend = str(request.get("backend") or desktop.backend)
+                if request.get("backend") and request["backend"] != desktop.backend:
+                    backend = str(request["backend"])
             fps = 60 if int(request.get("fps") or 30) >= 45 else 30
             want_mic = bool(request.get("microphone"))
             want_system = bool(request.get("system_audio"))
@@ -90,6 +101,12 @@ class Recorder:
             geometry, cursor_baked, command, sidecar, portal = self._command(
                 backend, request, desktop, fps, audio, output
             )
+            camera_device = self._resolve_camera_device(request) if (
+                source not in {"camera", "phone"} and bool(request.get("camera"))
+            ) else None
+            camera_cmd = None
+            if camera_device:
+                camera_cmd = camera_sidecar_command(camera_device, fps, str(directory / "camera.mp4"))
             video_log = open(directory / "capture.log", "w", encoding="utf-8")
             try:
                 video = subprocess.Popen(command, stdout=video_log, stderr=subprocess.STDOUT)
@@ -102,12 +119,19 @@ class Recorder:
             audio_proc = None
             if sidecar:
                 audio_proc = subprocess.Popen(sidecar, stdout=video_log, stderr=subprocess.STDOUT)
+            camera_proc = None
+            if camera_cmd:
+                try:
+                    camera_proc = subprocess.Popen(camera_cmd, stdout=video_log, stderr=subprocess.STDOUT)
+                except OSError:
+                    camera_proc = None
             sampler = None
             if not cursor_baked and geometry is not None and backend == "x11":
                 sampler = PointerSampler(os.environ.get("DISPLAY"), geometry)
                 sampler.start()
             self._video = video
             self._audio = audio_proc
+            self._camera = camera_proc
             self._sampler = sampler
             self._portal = portal
             self._started = time.monotonic()
@@ -116,12 +140,16 @@ class Recorder:
             self._spec = {
                 "id": project_id,
                 "backend": backend,
+                "source": source,
                 "fps": fps,
                 "geometry": geometry,
                 "cursor_baked": cursor_baked,
                 "name": request.get("name") or _default_name(),
                 "audio": audio,
                 "sidecar": sidecar is not None,
+                "camera_device": camera_device,
+                "camera_sidecar": camera_proc is not None,
+                "phone": self._phone_spec(request, desktop) if source == "phone" else None,
             }
             self._serve_marks()
             time.sleep(0.4)
@@ -130,6 +158,31 @@ class Recorder:
                 self._cleanup_failed()
                 raise DogSCError(detail or "录制进程马上退出了。")
             return self.status() | {"id": project_id}
+
+    def _phone_spec(self, request: dict, desktop: Desktop) -> dict:
+        platform = str(request.get("phone_platform") or "android")
+        remote = None
+        if platform == "android" and not desktop.tools.scrcpy and desktop.tools.adb:
+            remote = "/sdcard/dogsc-capture.mp4"
+        return {
+            "id": request.get("phone_id"),
+            "platform": platform,
+            "remote": remote,
+        }
+
+    def _resolve_camera_device(self, request: dict) -> str | None:
+        requested = str(request.get("camera_device") or "").strip()
+        cameras = list_cameras()
+        if requested:
+            match = next((item for item in cameras if item["id"] == requested or item["path"] == requested), None)
+            if match:
+                return match["path"]
+            if requested.startswith("/dev/video"):
+                return requested
+            raise DogSCError("找不到所选摄像头。")
+        if cameras:
+            return cameras[0]["path"]
+        raise DogSCError("没有可用的摄像头。请连接 V4L2 设备或检查权限。")
 
     def mark(self, label: str = "") -> dict:
         if not self.active():
@@ -150,10 +203,12 @@ class Recorder:
             markers = list(self._markers)
             video = self._video
             audio = self._audio
+            camera = self._camera
             sampler = self._sampler
             portal = self._portal
             self._video = None
             self._audio = None
+            self._camera = None
             self._sampler = None
             self._portal = None
             self._spec = None
@@ -163,10 +218,15 @@ class Recorder:
         _interrupt(video)
         if audio:
             _interrupt(audio)
+        if camera:
+            _interrupt(camera)
         events = sampler.stop() if sampler else []
         if portal:
             portal.close()
         media = directory / "media.mp4"
+        phone = spec.get("phone") or {}
+        if phone.get("platform") == "android" and phone.get("remote") and (not media.exists() or media.stat().st_size == 0):
+            self._pull_android_recording(str(phone.get("id") or ""), phone["remote"], media)
         if spec.get("sidecar") and (directory / "audio.m4a").exists() and media.exists():
             muxed = directory / "muxed.mp4"
             subprocess.run(mux_command(str(media), str(directory / "audio.m4a"), str(muxed)), check=False)
@@ -180,6 +240,7 @@ class Recorder:
             raise DogSCError(str(error)) from error
         capture = {
             "backend": spec["backend"],
+            "source": spec.get("source") or "display",
             "cursor_baked": spec["cursor_baked"],
             "geometry": spec["geometry"],
         }
@@ -191,6 +252,21 @@ class Recorder:
             if item["local"] <= info["duration"] + 0.05
         ]
         project["draw_cursor"] = not spec["cursor_baked"] and bool(events)
+        camera_file = directory / "camera.mp4"
+        if camera_file.exists() and camera_file.stat().st_size > 0:
+            project["camera"] = {
+                **(project.get("camera") or {}),
+                "enabled": True,
+                "device": spec.get("camera_device"),
+                "media": "camera.mp4",
+            }
+        elif spec.get("source") == "camera":
+            project["camera"] = {
+                **(project.get("camera") or {}),
+                "enabled": False,
+                "device": spec.get("camera_device"),
+                "media": None,
+            }
         final_dir = project_dir(project["id"])
         if final_dir != directory:
             directory.rename(final_dir)
@@ -204,6 +280,24 @@ class Recorder:
         save(project)
         return project
 
+    def _pull_android_recording(self, serial: str, remote: str, local: Path) -> None:
+        if not serial:
+            return
+        # Best-effort interrupt of on-device screenrecord then pull.
+        subprocess.run(
+            ["adb", "-s", serial, "shell", "pkill", "-INT", "screenrecord"],
+            check=False, capture_output=True, text=True,
+        )
+        time.sleep(0.6)
+        subprocess.run(
+            ["adb", "-s", serial, "pull", remote, str(local)],
+            check=False, capture_output=True, text=True,
+        )
+        subprocess.run(
+            ["adb", "-s", serial, "shell", "rm", "-f", remote],
+            check=False, capture_output=True, text=True,
+        )
+
     def _command(self, backend: str, request: dict, desktop: Desktop, fps: int, audio: list[str], output: Path):
         source = str(request.get("source") or "display")
         if backend == "fixture":
@@ -216,6 +310,17 @@ class Recorder:
                 str(output),
             ]
             return {"x": 0, "y": 0, "width": 640, "height": 360}, True, command, None, None
+        if backend == "camera":
+            device = self._resolve_camera_device(request)
+            return (
+                {"x": 0, "y": 0, "width": 1280, "height": 720},
+                True,
+                camera_record_command(device, fps, audio, str(output)),
+                None,
+                None,
+            )
+        if backend == "phone":
+            return self._phone_command(request, desktop, fps, audio, output)
         if backend == "x11":
             geometry = self._x11_geometry(source, request)
             return geometry, False, x11_record_command(os.environ.get("DISPLAY") or ":0", geometry, fps, audio, str(output)), None, None
@@ -237,6 +342,48 @@ class Recorder:
             sidecar = audio_sidecar_command(audio, str(output.parent / "audio.m4a")) if audio else None
             return None, True, portal_gstreamer_command(node, str(output)), sidecar, portal
         raise DogSCError(f"不支持的录制方式：{backend}")
+
+    def _phone_command(self, request: dict, desktop: Desktop, fps: int, audio: list[str], output: Path):
+        phone_id = str(request.get("phone_id") or "").strip()
+        platform = str(request.get("phone_platform") or "").strip()
+        phones = list_phones()
+        phone = next((item for item in phones if item["id"] == phone_id), None)
+        if phone is None and phone_id:
+            # Allow explicit serial even if enumeration raced.
+            phone = {
+                "id": phone_id,
+                "serial": phone_id,
+                "platform": platform or "android",
+                "ready": platform == "android",
+                "hint": "linux-ios-continuity" if platform == "ios" else None,
+            }
+        if phone is None:
+            raise DogSCError("请先选择已连接的手机。")
+        if phone.get("platform") == "ios" or platform == "ios":
+            raise DogSCError(
+                "Linux 无法直接有线录制 iPhone 屏幕（需要 macOS Continuity）。"
+                "若 iPhone 以 UVC 摄像头出现，请改用「摄像头」源；否则请用隔空播放接收器或改在 macOS 上采集。"
+            )
+        serial = str(phone.get("serial") or phone["id"])
+        if desktop.tools.scrcpy:
+            sidecar = audio_sidecar_command(audio, str(output.parent / "audio.m4a")) if audio else None
+            return (
+                {"x": 0, "y": 0, "width": 1080, "height": 1920},
+                True,
+                android_scrcpy_command(serial, fps, str(output)),
+                sidecar,
+                None,
+            )
+        if desktop.tools.adb:
+            sidecar = audio_sidecar_command(audio, str(output.parent / "audio.m4a")) if audio else None
+            return (
+                {"x": 0, "y": 0, "width": 1080, "height": 1920},
+                True,
+                android_adb_screenrecord_command(serial),
+                sidecar,
+                None,
+            )
+        raise DogSCError("录制 Android 需要安装 adb；推荐同时安装 scrcpy。")
 
     def _x11_geometry(self, source: str, request: dict) -> dict:
         displays = list_xrandr()
@@ -339,10 +486,13 @@ class Recorder:
             self._portal.close()
         if self._sampler:
             self._sampler.stop()
+        if self._camera:
+            _interrupt(self._camera)
         self._close_socket()
         self._close_log()
         self._video = None
         self._audio = None
+        self._camera = None
         self._sampler = None
         self._portal = None
         self._spec = None

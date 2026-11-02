@@ -43,6 +43,9 @@
 | G33 | Mosaic 舞台缩放 | 四角控点 | **已落地** 选中后四角 resize |
 | G34 | Focus map 拖拽 | 运镜焦点 | **已落地** pointer drag |
 | G35 | 逐帧 / 跳秒 / 片段换序 | ←→ ⇧ , . [ ] | **已落地** |
+| G36 | 摄像头主源 / 录屏 PiP 副轨 | AVCapture + Continuity Camera | **已落地** V4L2 枚举 + ffmpeg 主源/sidecar → `camera.mp4` |
+| G37 | Android 手机屏幕 | （mac 无） | **已落地** scrcpy 优先 / adb screenrecord 回退 |
+| G38 | iPhone 有线屏幕 | Continuity / CMIO screen devices | **明示限制**：Linux 无 Continuity；UVC 出现时走摄像头；idevice 仅枚举提示 |
 
 ## P2+ 与原生毕业路径
 
@@ -53,7 +56,7 @@
 | Ubuntu Wayland 采集 | **xdg-desktop-portal + PipeWire**（已有）/ GTK4+GStreamer | 门户契合度最高 |
 | 指针轨迹 | **libinput** / portal remote desktop | 浏览器拿不到 CGEvent 级流 |
 
-**结论：** Web Soft Silver 已收齐可复刻 P1（含 G09/G13/G16/G17/G20 滞回、G23/G26、G28–G35）。首页录制岛为舞台主角（品牌进顶栏）；编辑器为 docked chrome + WorkspaceGrid + ≈10 画布 + 安静检查器 wells。P0 预览真相源 / continuous 圆角 / 浮动录制窗的**最优解**仍是 **Qt6-QML-Vulkan**（`linux/native/qt6`，已加深 docked 壳 / HUD / 录制 morph）；Web 用 `corner-shape: squircle` 作 continuous 过渡近似。
+**结论：** Web Soft Silver 已收齐可复刻 P1（含 G09/G13/G16/G17/G20 滞回、G23/G26、G28–G35、**G36–G38 输入源**）。首页录制岛为舞台主角；编辑器 docked chrome。输入源：显示器/窗口/区域 + **V4L2 摄像头**（主源或录屏 PiP）+ **Android scrcpy/adb**；iPhone Continuity 仍属 macOS。P0 预览真相源 / continuous / 浮动录制窗最优解仍是 **Qt6-QML-Vulkan**。
 
 ## Oil Pro 视觉复拍（本轮）
 

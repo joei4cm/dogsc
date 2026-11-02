@@ -21,7 +21,18 @@ from dogsc.portal import parse_node_id
 from dogsc.project import import_media
 from dogsc.recorder import Recorder
 from dogsc.server import Handler, _ffmpeg_failure, create_demo
-from dogsc.sources import hyprland_record_command, parse_hypr_clients, parse_hypr_monitors, parse_xrandr, portal_ffmpeg_command, x11_record_command
+from dogsc.sources import (
+    camera_record_command,
+    hyprland_record_command,
+    parse_adb_devices,
+    parse_hypr_clients,
+    parse_hypr_monitors,
+    parse_idevice_list,
+    parse_v4l2_ctl_list,
+    parse_xrandr,
+    portal_ffmpeg_command,
+    x11_record_command,
+)
 from dogsc.timeline import delete_clip, move_clip, split_clip, trim_clip
 from dogsc.zoom import plan_auto_zooms, sample, viewport
 from http.server import ThreadingHTTPServer
@@ -86,6 +97,29 @@ class CaptureCommandTests(unittest.TestCase):
     def test_portal_node_parser(self):
         self.assertEqual(parse_node_id([(7, {"size": (100, 100)})]), 7)
         self.assertEqual(parse_node_id([{"node_id": 9}]), 9)
+
+    def test_camera_and_phone_parsers(self):
+        cameras = parse_v4l2_ctl_list(
+            "HD Webcam (usb-0000:00:14.0-1):\n\t/dev/video0\n\t/dev/video1\n"
+            "Virtual Camera:\n\t/dev/video2\n"
+        )
+        self.assertEqual(cameras[0]["path"], "/dev/video0")
+        self.assertEqual(cameras[0]["name"], "HD Webcam")
+        self.assertEqual(len(cameras), 2)
+        command = camera_record_command("/dev/video0", 30, [], "/tmp/cam.mp4")
+        self.assertIn("v4l2", command)
+        self.assertIn("/dev/video0", command)
+        phones = parse_adb_devices(
+            "List of devices attached\n"
+            "emulator-5554 device product:sdk_gphone model:Pixel_6 device:generic\n"
+            "offline-1 offline\n"
+        )
+        self.assertEqual(phones[0]["serial"], "emulator-5554")
+        self.assertEqual(phones[0]["platform"], "android")
+        self.assertIn("Pixel", phones[0]["name"])
+        ios = parse_idevice_list("00008030-001A1D123456789A\n")
+        self.assertEqual(ios[0]["platform"], "ios")
+        self.assertFalse(ios[0]["ready"])
 
 
 class CropModelTests(unittest.TestCase):
