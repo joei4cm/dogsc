@@ -43,7 +43,7 @@
 | G33 | Mosaic 舞台缩放 | 四角控点 | **已落地** 选中后四角 resize |
 | G34 | Focus map 拖拽 | 运镜焦点 | **已落地** pointer drag |
 | G35 | 逐帧 / 跳秒 / 片段换序 | ←→ ⇧ , . [ ] | **已落地** |
-| G36 | 摄像头主源 / 录屏 PiP 副轨 | AVCapture + Continuity Camera | **已落地** V4L2 枚举 + ffmpeg 主源/sidecar → `camera.mp4` |
+| G36 | 摄像头主源 / 录屏 PiP 副轨 | AVCapture + Continuity Camera | **已落地** V4L2 枚举 + ffmpeg 主源/sidecar → `camera.mp4`；导出滤镜叠画中画 |
 | G37 | Android 手机屏幕 | （mac 无） | **已落地** scrcpy 优先 / adb screenrecord 回退 |
 | G38 | iPhone 有线屏幕 | Continuity / CMIO screen devices | **明示限制**：Linux 无 Continuity；UVC 出现时走摄像头；idevice 仅枚举提示 |
 

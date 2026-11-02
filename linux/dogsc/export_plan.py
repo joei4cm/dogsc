@@ -17,6 +17,31 @@ def even(value: float) -> int:
     return max(number, 2)
 
 
+def camera_pip_layout(camera: dict, content_w: int, content_h: int) -> dict[str, int | str]:
+    """Map Soft Silver camera inspector knobs onto content-box pixels."""
+    size = min(max(float(camera.get("size") or 0.22), 0.08), 0.5)
+    cx = min(max(float(camera.get("x") if camera.get("x") is not None else 0.82), 0), 1)
+    cy = min(max(float(camera.get("y") if camera.get("y") is not None else 0.78), 0), 1)
+    shape = str(camera.get("shape") or "circle")
+    base = max(even(content_w * size), 2)
+    if shape in {"circle", "square"}:
+        width = height = base
+    elif shape == "vertical":
+        width = base
+        height = max(even(base * 16 / 9), 2)
+    elif shape == "horizontal":
+        width = max(even(base * 16 / 9), 2)
+        height = base
+    else:  # original — assume 16:9 box; scale keeps AR later
+        width = max(even(base * 16 / 9), 2)
+        height = base
+    x = int(cx * content_w - width / 2)
+    y = int(cy * content_h - height / 2)
+    x = min(max(x, 0), max(content_w - width, 0))
+    y = min(max(y, 0), max(content_h - height, 0))
+    return {"x": x, "y": y, "w": width, "h": height, "shape": shape}
+
+
 def canvas_size(src_w: int, src_h: int, aspect: str, resolution: str) -> tuple[int, int]:
     ratios = {
         "source": None,
@@ -392,6 +417,28 @@ def build_export(project: dict, media: Path, pointer: list[dict], output: Path, 
         sticker_inputs.append((next_input, sticker))
         next_input += 1
 
+    camera = project.get("camera") or {}
+    camera_index = None
+    camera_mask_index = None
+    camera_path = media.parent / str(camera.get("media") or "camera.mp4")
+    if bool(camera.get("enabled")) and camera_path.is_file():
+        inputs.extend(["-i", str(camera_path)])
+        camera_index = next_input
+        next_input += 1
+        # Placeholder layout uses content box size; refined again when composing.
+        preview_pip = camera_pip_layout(camera, box["content_w"], box["content_h"])
+        if preview_pip["shape"] == "circle":
+            cam_mask_path = work / "camera-mask.png"
+            rounded_mask(
+                cam_mask_path,
+                int(preview_pip["w"]),
+                int(preview_pip["h"]),
+                min(int(preview_pip["w"]), int(preview_pip["h"])) / 2,
+            )
+            inputs.extend(["-loop", "1", "-framerate", str(fps), "-i", str(cam_mask_path)])
+            camera_mask_index = next_input
+            next_input += 1
+
     graph = [video_segments(project["clips"])]
     current = "cat"
     if cursor_index is not None:
@@ -502,6 +549,39 @@ def build_export(project: dict, media: Path, pointer: list[dict], output: Path, 
             f"[{current}][{label}]overlay=x={x}:y={y}:enable='between({time_token()},{start:.3f},{end:.3f})'[stout{index}]"
         )
         current = f"stout{index}"
+
+    if camera_index is not None:
+        pip = camera_pip_layout(camera, box["content_w"], box["content_h"])
+        pip_x = int(box["x"] + pip["x"])
+        pip_y = int(box["y"] + pip["y"])
+        mirror = ",hflip" if camera.get("mirror") else ""
+        opacity = min(max(float(camera.get("opacity") if camera.get("opacity") is not None else 1), 0.05), 1)
+        border = max(int(float(camera.get("border") or 0)), 0)
+        border_color = hex_color(str(camera.get("border_color") or "#ffffff"))
+        graph.append(
+            f"[{camera_index}:v]fps={fps},scale={pip['w']}:{pip['h']}:force_original_aspect_ratio=increase,"
+            f"crop={pip['w']}:{pip['h']}{mirror},format=rgba,colorchannelmixer=aa={opacity:.3f}[campip]"
+        )
+        cam_label = "campip"
+        if camera_mask_index is not None:
+            graph.append(
+                f"[{camera_mask_index}:v]scale={pip['w']}:{pip['h']},format=rgba[cammask];"
+                f"[campip][cammask]alphamerge[campipa]"
+            )
+            cam_label = "campipa"
+        if border > 0:
+            bw = border
+            graph.append(
+                f"color=c={border_color}:s={pip['w'] + bw * 2}x{pip['h'] + bw * 2}:r={fps}:d={duration + 1:.3f},"
+                f"format=rgba[camborder];"
+                f"[camborder][{cam_label}]overlay=x={bw}:y={bw}:shortest=1[cambordered];"
+                f"[{current}][cambordered]overlay=x={pip_x - bw}:y={pip_y - bw}:shortest=1[withcam]"
+            )
+        else:
+            graph.append(
+                f"[{current}][{cam_label}]overlay=x={pip_x}:y={pip_y}:shortest=1[withcam]"
+            )
+        current = "withcam"
 
     graph.append(
         f"[{current}]trim=duration={duration:.3f},setpts=PTS-STARTPTS,format=yuv420p[vout]"
