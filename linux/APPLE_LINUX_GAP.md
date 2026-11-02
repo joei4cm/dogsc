@@ -69,4 +69,5 @@
 | 首页（录制岛 hero） | `.oil-ui/soft-silver-gap/hero-home/` |
 | 编辑器（docked chrome） | `.oil-ui/soft-silver-gap/hero-editor/` |
 | Apple parity 基线 | `.oil-ui/apple-parity/` |
-| 诊断 | `.oil-ui/soft-silver-gap/diagnosis.md` |
+| 倒计时 / 标记 / 焦点虚化 | `.oil-ui/apple-parity-polish/` |
+| 诊断 | `.oil-ui/apple-parity-polish/diagnosis.md` |
