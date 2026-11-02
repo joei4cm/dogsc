@@ -321,13 +321,47 @@ def hex_color(value: str) -> str:
     return "0x" + text[1:]
 
 
+def export_window(project: dict) -> tuple[float, float] | None:
+    """Optional authored-timeline window for ranged / selection exports."""
+    export = project.get("export") or {}
+    clips = project.get("clips") or []
+    duration = max(sum(clip_duration(clip) for clip in clips), 0.1)
+    if export.get("range_start") is not None and export.get("range_end") is not None:
+        start = max(float(export["range_start"]), 0.0)
+        end = min(max(float(export["range_end"]), start + 0.05), duration)
+        if end - start >= 0.05:
+            return start, end
+    if str(export.get("scope") or "full") != "selection":
+        return None
+    selected = {str(item) for item in (export.get("selected_ids") or [])}
+    if not selected:
+        return None
+    rows: list[tuple[float, float]] = []
+    cursor = 0.0
+    for clip in clips:
+        length = clip_duration(clip)
+        if str(clip.get("id")) in selected:
+            rows.append((cursor, cursor + length))
+        cursor += length
+    if not rows:
+        return None
+    start = min(row[0] for row in rows)
+    end = max(row[1] for row in rows)
+    if end - start < 0.05:
+        return None
+    return start, min(end, duration)
+
+
 def build_export(project: dict, media: Path, pointer: list[dict], output: Path, work: Path) -> list[str]:
+    export = project.get("export") or {}
+    if str(export.get("kind") or "video") == "audio":
+        return build_audio_export(project, media, output)
+
     info = project["media"]
     src_w = int(info["width"])
     src_h = int(info["height"])
     canvas = project.get("canvas") or {}
     cursor = project.get("cursor") or {}
-    export = project.get("export") or {}
     fps = int(export.get("fps") or 30)
     crop = clamp_crop(canvas.get("crop"))
     cropped_w = max(even(src_w * float(crop["width"])), 2)
@@ -536,6 +570,7 @@ def build_export(project: dict, media: Path, pointer: list[dict], output: Path, 
         )
         current = "framedui"
 
+    sticker_inputs.sort(key=lambda pair: (int(pair[1].get("layer_index") or 0), float(pair[1].get("start") or 0), pair[0]))
     for index, (input_index, sticker) in enumerate(sticker_inputs):
         width = max(even(float(sticker.get("width") or 0.22) * box["content_w"]), 2)
         x = int(box["x"] + float(sticker.get("x") or 0.72) * box["content_w"])
@@ -543,9 +578,17 @@ def build_export(project: dict, media: Path, pointer: list[dict], output: Path, 
         start = float(sticker["start"])
         end = float(sticker["end"])
         opacity = min(max(float(sticker.get("opacity") or 1), 0.05), 1)
+        border = max(int(float(sticker.get("border") or 0)), 0)
+        border_color = hex_color(str(sticker.get("border_color") or "#ffffff"))
         label = f"stk{index}"
+        chain = f"[{input_index}:v]scale={width}:-1,format=rgba"
+        if border > 0:
+            chain += f",pad=iw+{border * 2}:ih+{border * 2}:{border}:{border}:{border_color}"
+            x -= border
+            y -= border
+        chain += f",colorchannelmixer=aa={opacity:.3f}[{label}]"
         graph.append(
-            f"[{input_index}:v]scale={width}:-1,format=rgba,colorchannelmixer=aa={opacity:.3f}[{label}];"
+            f"{chain};"
             f"[{current}][{label}]overlay=x={x}:y={y}:enable='between({time_token()},{start:.3f},{end:.3f})'[stout{index}]"
         )
         current = f"stout{index}"
@@ -583,13 +626,27 @@ def build_export(project: dict, media: Path, pointer: list[dict], output: Path, 
             )
         current = "withcam"
 
-    graph.append(
-        f"[{current}]trim=duration={duration:.3f},setpts=PTS-STARTPTS,format=yuv420p[vout]"
-    )
+    window = export_window(project)
+    if window:
+        start, end = window
+        graph.append(
+            f"[{current}]trim=start={start:.3f}:end={end:.3f},setpts=PTS-STARTPTS,format=yuv420p[vout]"
+        )
+    else:
+        graph.append(
+            f"[{current}]trim=duration={duration:.3f},setpts=PTS-STARTPTS,format=yuv420p[vout]"
+        )
     maps = ["-map", "[vout]"]
     if info.get("has_audio"):
         graph.append(audio_segments(project["clips"], project.get("audio") or {}))
-        maps.extend(["-map", "[aout]", "-c:a", "aac", "-b:a", "192k"])
+        audio_label = "aout"
+        if window:
+            start, end = window
+            graph.append(
+                f"[aout]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS[aoutw]"
+            )
+            audio_label = "aoutw"
+        maps.extend(["-map", f"[{audio_label}]", "-c:a", "aac", "-b:a", "192k"])
     command = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
         *inputs,
@@ -601,6 +658,35 @@ def build_export(project: dict, media: Path, pointer: list[dict], output: Path, 
         str(output),
     ]
     return command
+
+
+def build_audio_export(project: dict, media: Path, output: Path) -> list[str]:
+    info = project.get("media") or {}
+    has_audio = bool(info.get("has_audio"))
+    if media.is_file():
+        try:
+            has_audio = bool(probe(media).get("has_audio"))
+        except Exception:
+            pass
+    if not has_audio:
+        raise DogSCError("当前项目没有可导出的音频。")
+    window = export_window(project)
+    graph = [audio_segments(project["clips"], project.get("audio") or {})]
+    audio_label = "aout"
+    if window:
+        start, end = window
+        graph.append(f"[aout]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS[aoutw]")
+        audio_label = "aoutw"
+    return [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-i", str(media),
+        "-filter_complex", ";".join(graph),
+        "-map", f"[{audio_label}]",
+        "-c:a", "aac", "-b:a", "192k",
+        "-vn",
+        "-movflags", "+faststart",
+        str(output),
+    ]
 
 
 def _render_background(path: Path, canvas: dict, width: int, height: int) -> None:
@@ -743,7 +829,11 @@ def estimate_export(project: dict, media: Path | None = None) -> dict:
     export = project.get("export") or {}
     clips = project.get("clips") or []
     duration = max(sum(clip_duration(clip) for clip in clips), 0.1)
+    window = export_window(project)
+    if window:
+        duration = max(window[1] - window[0], 0.05)
     fps = int(export.get("fps") or 30)
+    kind = str(export.get("kind") or "video")
     src_w = src_h = 1920
     if media and Path(media).is_file():
         try:
@@ -765,16 +855,23 @@ def estimate_export(project: dict, media: Path | None = None) -> dict:
         str(canvas.get("aspect") or "source"),
         str(export.get("resolution") or "1080p"),
     )
-    megapixels = (width * height) / 1_000_000
-    # Soft H.264-ish bitrate curve used only for UI sizing, not encoding.
-    mbps = max(2.5, min(28.0, 3.2 + megapixels * 2.4)) * (fps / 30)
     audio_mbps = 0.16
+    if kind == "audio":
+        mbps = 0.0
+        width = 0
+        height = 0
+    else:
+        megapixels = (width * height) / 1_000_000
+        # Soft H.264-ish bitrate curve used only for UI sizing, not encoding.
+        mbps = max(2.5, min(28.0, 3.2 + megapixels * 2.4)) * (fps / 30)
     bytes_est = int((mbps + audio_mbps) * 1_000_000 / 8 * duration)
     return {
         "width": width,
         "height": height,
         "fps": fps,
         "duration": duration,
+        "kind": kind,
+        "scope": str(export.get("scope") or "full"),
         "megabits_per_second": round(mbps + audio_mbps, 2),
         "bytes": bytes_est,
     }

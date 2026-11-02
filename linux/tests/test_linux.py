@@ -13,9 +13,9 @@ import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from dogsc.export_plan import build_export, camera_pip_layout, canvas_size, estimate_export, preview_sample
+from dogsc.export_plan import build_audio_export, build_export, camera_pip_layout, canvas_size, estimate_export, export_window, preview_sample
 from dogsc.media import probe
-from dogsc.model import clamp_crop, migrate
+from dogsc.model import blank_sticker, clamp_crop, migrate, normalize_opening_order
 from dogsc.platform import Toolchain, choose_backend, classify_audio, family_of, parse_os_release, parse_pactl_sources, session_of
 from dogsc.portal import parse_node_id
 from dogsc.project import import_media
@@ -465,6 +465,164 @@ class ClipAudioAndPauseTests(unittest.TestCase):
             self.assertFalse(resumed["paused"])
             self.assertTrue(resumed["active"])
             recorder.discard()
+
+
+class AppleParityBatchTests(unittest.TestCase):
+    def test_sticker_and_opening_migrate_defaults(self):
+        project = migrate({
+            "id": "parity",
+            "clips": [{"id": "c1", "src_in": 0, "src_out": 2, "speed": 1}],
+            "stickers": [{"id": "s1", "path": "stickers/a.png", "start": 0, "end": 1, "x": 0.5, "y": 0.5}],
+            "opening": {"enabled": True, "include_camera": False},
+            "media": {"width": 1280, "height": 720, "duration": 2, "has_audio": True},
+        })
+        sticker = project["stickers"][0]
+        self.assertIn("border", sticker)
+        self.assertIn("shadow", sticker)
+        self.assertIn("layer_index", sticker)
+        self.assertEqual(project["opening"]["element_order"], ["screen", "camera", "stickers"])
+        self.assertFalse(project["opening"]["include_camera"])
+        self.assertEqual(normalize_opening_order(["stickers", "screen", "nope"]), ["stickers", "screen", "camera"])
+        blank = blank_sticker(0, 1, "stickers/x.png")
+        self.assertEqual(blank["exit_animation"], "none")
+
+    def test_export_window_and_audio_estimate(self):
+        project = migrate({
+            "id": "range",
+            "clips": [
+                {"id": "a", "src_in": 0, "src_out": 2, "speed": 1},
+                {"id": "b", "src_in": 2, "src_out": 5, "speed": 1},
+            ],
+            "export": {"resolution": "1080p", "fps": 30, "kind": "audio", "scope": "selection", "selected_ids": ["b"]},
+            "media": {"width": 1280, "height": 720, "duration": 5, "has_audio": True},
+        })
+        window = export_window(project)
+        self.assertEqual(window, (2.0, 5.0))
+        estimate = estimate_export(project)
+        self.assertEqual(estimate["kind"], "audio")
+        self.assertEqual(estimate["width"], 0)
+        self.assertAlmostEqual(estimate["duration"], 3.0, places=3)
+
+    def test_sticker_opening_export_api_roundtrip(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            os.environ["DOGSC_HOME"] = str(Path(temporary) / "home")
+            project = create_demo()
+            server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                port = server.server_address[1]
+                base = f"http://127.0.0.1:{port}/api/projects/{project['id']}"
+                opening_body = json.dumps({
+                    "opening": {
+                        "enabled": True,
+                        "element_order": ["stickers", "camera", "screen"],
+                        "include_stickers": True,
+                        "stagger": 0.2,
+                    }
+                }).encode()
+                request = urllib.request.Request(
+                    f"{base}/meta", data=opening_body,
+                    headers={"Content-Type": "application/json"}, method="POST",
+                )
+                updated = json.load(urllib.request.urlopen(request, timeout=5))
+                self.assertEqual(updated["opening"]["element_order"][0], "stickers")
+
+                sticker = blank_sticker(0.2, 1.5, "stickers/demo.png")
+                sticker["clip_id"] = updated["clips"][0]["id"]
+                updated["stickers"] = [sticker]
+                from dogsc.project import save
+                save(updated)
+
+                sticker_body = json.dumps({
+                    "id": sticker["id"],
+                    "border": 4,
+                    "border_color": "#112233",
+                    "shadow": 0.5,
+                    "backdrop_blur": 12,
+                    "layer_index": 3,
+                    "exit_animation": "fade",
+                    "enter": 0.4,
+                }).encode()
+                request = urllib.request.Request(
+                    f"{base}/sticker-update", data=sticker_body,
+                    headers={"Content-Type": "application/json"}, method="POST",
+                )
+                patched = json.load(urllib.request.urlopen(request, timeout=5))
+                item = patched["stickers"][0]
+                self.assertEqual(item["border"], 4)
+                self.assertEqual(item["border_color"], "#112233")
+                self.assertEqual(item["layer_index"], 3)
+                self.assertEqual(item["exit_animation"], "fade")
+
+                export_meta = json.dumps({"export": {"kind": "audio", "scope": "full"}}).encode()
+                request = urllib.request.Request(
+                    f"{base}/meta", data=export_meta,
+                    headers={"Content-Type": "application/json"}, method="POST",
+                )
+                exported = json.load(urllib.request.urlopen(request, timeout=5))
+                self.assertEqual(exported["export"]["kind"], "audio")
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+    def test_delete_clips_batch(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            os.environ["DOGSC_HOME"] = str(Path(temporary) / "home")
+            project = create_demo()
+            # Force three clips via split
+            server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                port = server.server_address[1]
+                base = f"http://127.0.0.1:{port}/api/projects/{project['id']}"
+                for moment in (1.0, 2.0):
+                    body = json.dumps({"time": moment}).encode()
+                    request = urllib.request.Request(
+                        f"{base}/split", data=body,
+                        headers={"Content-Type": "application/json"}, method="POST",
+                    )
+                    project = json.load(urllib.request.urlopen(request, timeout=5))
+                self.assertGreaterEqual(len(project["clips"]), 3)
+                keep = project["clips"][0]["id"]
+                drop = [clip["id"] for clip in project["clips"][1:]]
+                body = json.dumps({"ids": drop}).encode()
+                request = urllib.request.Request(
+                    f"{base}/delete-clips", data=body,
+                    headers={"Content-Type": "application/json"}, method="POST",
+                )
+                trimmed = json.load(urllib.request.urlopen(request, timeout=5))
+                self.assertEqual([clip["id"] for clip in trimmed["clips"]], [keep])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+    def test_audio_export_command(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            media = root / "in.mp4"
+            subprocess.run(
+                [
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+                    "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30:duration=1",
+                    "-shortest", str(media),
+                ],
+                check=True,
+            )
+            project = {
+                "id": "audio-only",
+                "clips": [{"id": "c", "src_in": 0, "src_out": 1, "speed": 1, "audio": {}}],
+                "audio": {"system_volume": 1, "system_muted": False},
+                "export": {"kind": "audio", "scope": "full", "fps": 30, "resolution": "source"},
+                "media": {"width": 320, "height": 240, "duration": 1, "has_audio": True},
+            }
+            command = build_audio_export(project, media, root / "out.m4a")
+            self.assertIn("-vn", command)
+            self.assertTrue(any(part.endswith("out.m4a") for part in command))
 
 
 if __name__ == "__main__":

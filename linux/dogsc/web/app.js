@@ -12,6 +12,8 @@ const state = {
   selectedMotion: null,
   selectedMosaic: null,
   selectedSticker: null,
+  selectedClipIds: [],
+  effectClipboard: null,
   tab: "frame",
   frameTab: "background",
   bgTab: "wallpaper",
@@ -500,6 +502,10 @@ function shortcutHint(action) {
     split: "S",
     back: "Esc",
     export: `${mod}+E`,
+    trimIn: "Q",
+    trimOut: "W",
+    copyEffect: `${mod}+C`,
+    pasteEffect: `${mod}+Shift+V`,
   };
   return map[action] || "";
 }
@@ -893,9 +899,14 @@ function stageHudHtml(project) {
     <div class="shortcut-row"><span>${t("undo")}</span><kbd>${shortcutHint("undo")}</kbd></div>
     <div class="shortcut-row"><span>${t("redo")}</span><kbd>${shortcutHint("redo")}</kbd></div>
     <div class="shortcut-row"><span>${t("split")}</span><kbd>${shortcutHint("split")}</kbd></div>
+    <div class="shortcut-row"><span>${state.lang === "zh" ? "修剪入点" : "Trim in"}</span><kbd>${shortcutHint("trimIn")}</kbd></div>
+    <div class="shortcut-row"><span>${state.lang === "zh" ? "修剪出点" : "Trim out"}</span><kbd>${shortcutHint("trimOut")}</kbd></div>
+    <div class="shortcut-row"><span>${state.lang === "zh" ? "复制效果属性" : "Copy effect"}</span><kbd>${shortcutHint("copyEffect")}</kbd></div>
+    <div class="shortcut-row"><span>${state.lang === "zh" ? "粘贴效果属性" : "Paste effect"}</span><kbd>${shortcutHint("pasteEffect")}</kbd></div>
     <div class="shortcut-row"><span>${state.lang === "zh" ? "微调 / 跳秒" : "Nudge / Jump"}</span><kbd>← → · ⇧</kbd></div>
     <div class="shortcut-row"><span>${state.lang === "zh" ? "逐帧" : "Frame step"}</span><kbd>, .</kbd></div>
     <div class="shortcut-row"><span>${state.lang === "zh" ? "片段前后移" : "Reorder clip"}</span><kbd>[ ]</kbd></div>
+    <div class="shortcut-row"><span>${state.lang === "zh" ? "多选片段" : "Multi-select"}</span><kbd>⇧ / ${modKey()}</kbd></div>
     <div class="shortcut-row"><span>${state.lang === "zh" ? "删除选中" : "Delete"}</span><kbd>Delete</kbd></div>
     <div class="shortcut-row"><span>${state.lang === "zh" ? "关闭浮层" : "Dismiss"}</span><kbd>${shortcutHint("back")}</kbd></div>
   </aside>` : "";
@@ -1007,22 +1018,32 @@ function exportSheetHtml() {
   const estimate = sheet.estimate || {};
   const progress = Math.round((sheet.progress || 0) * 100);
   const busy = sheet.state === "running";
+  const exp = state.project.export || {};
+  const kind = exp.kind || "video";
+  const scope = exp.scope || "full";
+  const selectedCount = (state.selectedClipIds || []).length;
+  const sizeLabel = kind === "audio"
+    ? (zh ? "音频" : "Audio")
+    : `${estimate.width || "—"}×${estimate.height || "—"}`;
   return `<div class="export-scrim" id="export-scrim">
     <aside class="export-sheet island" role="dialog" aria-label="${t("export")}">
       <div class="section-title">${zh ? "导出成片" : "Export"}</div>
-      <p class="note">${zh ? "按当前画面、裁切与运镜生成 MP4。" : "Renders MP4 with current canvas, crop, and motion."}</p>
-      <label class="field">${t("resolution")}<select id="sheet-resolution" ${busy ? "disabled" : ""}>${options(["source", "1080p", "1440p", "4k"], state.project.export.resolution)}</select></label>
-      <label class="field">${t("fps")}<select id="sheet-fps" ${busy ? "disabled" : ""}>${options(["30", "60"], String(state.project.export.fps))}</select></label>
+      <p class="note">${zh ? "可导出整段或选中片段，支持视频与仅音频。" : "Full timeline or selection; video or audio-only."}</p>
+      <label class="field">${zh ? "输出" : "Output"}<select id="sheet-kind" ${busy ? "disabled" : ""}>${options(["video", "audio"], kind, { video: zh ? "视频 MP4" : "Video MP4", audio: zh ? "仅音频 M4A" : "Audio M4A" })}</select></label>
+      <label class="field">${zh ? "范围" : "Scope"}<select id="sheet-scope" ${busy ? "disabled" : ""}>${options(["full", "selection"], scope, { full: zh ? "整段时间线" : "Full timeline", selection: zh ? `选中片段${selectedCount ? ` (${selectedCount})` : ""}` : `Selection${selectedCount ? ` (${selectedCount})` : ""}` })}</select></label>
+      <label class="field">${t("resolution")}<select id="sheet-resolution" ${busy || kind === "audio" ? "disabled" : ""}>${options(["source", "1080p", "1440p", "4k"], exp.resolution)}</select></label>
+      <label class="field">${t("fps")}<select id="sheet-fps" ${busy || kind === "audio" ? "disabled" : ""}>${options(["30", "60"], String(exp.fps))}</select></label>
       <div class="export-meta">
-        <div><span>${zh ? "分辨率" : "Size"}</span><strong>${estimate.width || "—"}×${estimate.height || "—"}</strong></div>
+        <div><span>${zh ? "分辨率" : "Size"}</span><strong>${sizeLabel}</strong></div>
         <div><span>${zh ? "时长" : "Duration"}</span><strong>${formatTime(estimate.duration || Z.duration(state.project.clips))}</strong></div>
         <div><span>${zh ? "估大小" : "Est."}</span><strong>${formatBytes(estimate.bytes || 0)}</strong></div>
       </div>
+      ${scope === "selection" && selectedCount === 0 ? `<p class="note">${zh ? "先在时间线用 ⇧/⌘ 多选片段。" : "Multi-select clips with ⇧/⌘ first."}</p>` : ""}
       ${busy ? `<div class="export-progress"><i style="width:${progress}%"></i></div><p class="note">${zh ? `导出中… ${progress}%` : `Exporting… ${progress}%`}</p>` : ""}
       ${sheet.error ? `<p class="note" style="color:var(--red)">${escapeHtml(sheet.error)}</p>` : ""}
       <div class="export-actions">
         <button class="btn" id="export-cancel" ${busy ? "disabled" : ""}>${zh ? "取消" : "Cancel"}</button>
-        <button class="btn primary" id="export-start" ${busy ? "disabled" : ""}>${busy ? (zh ? "导出中" : "Working") : (zh ? "开始导出" : "Start")}</button>
+        <button class="btn primary" id="export-start" ${busy || (scope === "selection" && selectedCount === 0) ? "disabled" : ""}>${busy ? (zh ? "导出中" : "Working") : (zh ? "开始导出" : "Start")}</button>
       </div>
     </aside>
   </div>`;
@@ -1182,9 +1203,28 @@ function mockupPanel(canvas) {
     <label class="field">${state.lang === "zh" ? "地址" : "Address"}<input id="frame-address" type="text" value="${escapeHtml(canvas.frame_address || "dogsc.app")}"></label>`;
 }
 
+function openingElementOrder(opening) {
+  const order = Array.isArray(opening.element_order) && opening.element_order.length
+    ? opening.element_order
+    : ["screen", "camera", "stickers"];
+  const known = ["screen", "camera", "stickers"];
+  return [...order.filter((id) => known.includes(id)), ...known.filter((id) => !order.includes(id))];
+}
+
 function openingInspector() {
   const opening = state.project.opening || {};
   const zh = state.lang === "zh";
+  const labels = {
+    screen: zh ? "屏幕" : "Screen",
+    camera: t("camera"),
+    stickers: t("sticker"),
+  };
+  const include = {
+    screen: opening.include_screen !== false,
+    camera: opening.include_camera !== false,
+    stickers: opening.include_stickers !== false,
+  };
+  const order = openingElementOrder(opening);
   return `
     <h2>${t("opening")}</h2>
     <label class="row"><input id="opening-enabled" type="checkbox" ${opening.enabled ? "checked" : ""}> ${zh ? "启用开场" : "Enable opening"}</label>
@@ -1195,10 +1235,18 @@ function openingInspector() {
     <label class="field">${zh ? "节奏" : "Curve"}<select id="opening-curve">${options(["smooth","swift","gentle"], opening.curve || "smooth", { smooth: "平滑", swift: "利落", gentle: "柔和" })}</select></label>
     <label class="field">${fieldValue(zh ? "错峰" : "Stagger", `${Number(opening.stagger ?? 0.12).toFixed(2)}s`)}<input id="opening-stagger" type="range" min="0" max="1" step="0.02" value="${opening.stagger ?? 0.12}"></label>
     <div class="section" style="margin-top:12px">
-      <div class="section-title">${zh ? "包含元素" : "Include"}</div>
-      <label class="row"><input id="opening-include-screen" type="checkbox" ${opening.include_screen !== false ? "checked" : ""}> ${zh ? "屏幕" : "Screen"}</label>
-      <label class="row"><input id="opening-include-camera" type="checkbox" ${opening.include_camera !== false ? "checked" : ""}> ${t("camera")}</label>
-      <label class="row"><input id="opening-include-stickers" type="checkbox" ${opening.include_stickers !== false ? "checked" : ""}> ${t("sticker")}</label>
+      <div class="section-title">${zh ? "元素顺序" : "Element order"}</div>
+      <p class="note">${zh ? "勾选参与开场，并用箭头调整出现先后。" : "Toggle participants and reorder with arrows."}</p>
+      <div class="opening-order">
+        ${order.map((id, index) => `
+          <div class="opening-order-row${!include[id] ? " is-off" : ""}" data-opening-el="${id}">
+            <label class="row"><input type="checkbox" data-opening-include="${id}" ${include[id] ? "checked" : ""}> <strong>${labels[id]}</strong></label>
+            <div class="opening-order-actions">
+              <button type="button" class="btn ghost" data-opening-move="${id}" data-dir="-1" ${index === 0 ? "disabled" : ""} aria-label="up">↑</button>
+              <button type="button" class="btn ghost" data-opening-move="${id}" data-dir="1" ${index === order.length - 1 ? "disabled" : ""} aria-label="down">↓</button>
+            </div>
+          </div>`).join("")}
+      </div>
     </div>`;
 }
 
@@ -1303,7 +1351,18 @@ function stickerInspectorHtml(sticker, zh) {
         <label class="field">${fieldValue(zh ? "旋转" : "Rotate", `${Math.round(sticker.rotation || 0)}°`)}<input id="sticker-rotation" type="range" min="-180" max="180" step="1" value="${sticker.rotation || 0}"></label>
         <label class="field">${fieldValue(zh ? "透明度" : "Opacity", `${Math.round((sticker.opacity == null ? 1 : sticker.opacity) * 100)}%`)}<input id="sticker-opacity" type="range" min="0.05" max="1" step="0.01" value="${sticker.opacity == null ? 1 : sticker.opacity}"></label>
         <label class="field">${fieldValue(zh ? "圆角" : "Radius", `${Math.round(sticker.corner_radius || 18)}`)}<input id="sticker-radius" type="range" min="0" max="80" step="1" value="${sticker.corner_radius || 18}"></label>
-        <label class="field">${zh ? "动画" : "Animation"}<select id="sticker-animation">${options(["none","pop","fade","slide"], sticker.animation || "pop", { none: zh ? "无" : "None", pop: "Pop", fade: zh ? "淡入" : "Fade", slide: zh ? "滑入" : "Slide" })}</select></label>
+        <label class="field">${fieldValue(zh ? "描边" : "Border", `${Math.round(sticker.border || 0)}`)}<input id="sticker-border" type="range" min="0" max="16" step="1" value="${sticker.border || 0}"></label>
+        <label class="field">${zh ? "描边颜色" : "Border color"}<input id="sticker-border-color" type="color" value="${sticker.border_color || "#ffffff"}"></label>
+        <label class="field">${fieldValue(zh ? "阴影" : "Shadow", `${Math.round((sticker.shadow == null ? 0.28 : sticker.shadow) * 100)}%`)}<input id="sticker-shadow" type="range" min="0" max="1" step="0.05" value="${sticker.shadow == null ? 0.28 : sticker.shadow}"></label>
+        <label class="field">${fieldValue(zh ? "背景虚化" : "Backdrop", `${Math.round(sticker.backdrop_blur || 0)}`)}<input id="sticker-backdrop" type="range" min="0" max="40" step="1" value="${sticker.backdrop_blur || 0}"></label>
+        <label class="field">${zh ? "入场" : "Enter"}<select id="sticker-animation">${options(["none","pop","fade","slide"], sticker.animation || "pop", { none: zh ? "无" : "None", pop: "Pop", fade: zh ? "淡入" : "Fade", slide: zh ? "滑入" : "Slide" })}</select></label>
+        <label class="field">${fieldValue(zh ? "入场时长" : "Enter dur", `${Number(sticker.enter ?? 0.7).toFixed(2)}s`)}<input id="sticker-enter" type="range" min="0" max="2" step="0.05" value="${sticker.enter ?? 0.7}"></label>
+        <label class="field">${zh ? "退场" : "Exit"}<select id="sticker-exit-animation">${options(["none","pop","fade","slide"], sticker.exit_animation || "none", { none: zh ? "无" : "None", pop: "Pop", fade: zh ? "淡出" : "Fade", slide: zh ? "滑出" : "Slide" })}</select></label>
+        <label class="field">${fieldValue(zh ? "退场时长" : "Exit dur", `${Number(sticker.exit ?? 0.22).toFixed(2)}s`)}<input id="sticker-exit" type="range" min="0" max="2" step="0.05" value="${sticker.exit ?? 0.22}"></label>
+        <div class="actions" style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0">
+          <button class="btn" id="sticker-layer-back">${zh ? "下移一层" : "Send back"}</button>
+          <button class="btn" id="sticker-layer-front">${zh ? "上移一层" : "Bring forward"}</button>
+        </div>
         <button class="btn" id="delete-sticker">${t("delete")}</button>
       </div>`;
 }
@@ -1606,6 +1665,16 @@ function bind() {
     render();
   });
   document.querySelector("#export-start")?.addEventListener("click", startExportFromSheet);
+  document.querySelector("#sheet-kind")?.addEventListener("change", async (event) => {
+    await meta({ export: { ...state.project.export, kind: event.target.value } });
+    render();
+    refreshExportEstimate();
+  });
+  document.querySelector("#sheet-scope")?.addEventListener("change", async (event) => {
+    await meta({ export: { ...state.project.export, scope: event.target.value } });
+    render();
+    refreshExportEstimate();
+  });
   document.querySelector("#sheet-resolution")?.addEventListener("change", async (event) => {
     await meta({ export: { ...state.project.export, resolution: event.target.value } });
     refreshExportEstimate();
@@ -1883,9 +1952,6 @@ function bindInspectorFields() {
     ["#opening-duration", (v) => meta({ opening: { ...state.project.opening, duration: Number(v) } })],
     ["#opening-curve", (v) => meta({ opening: { ...state.project.opening, curve: v } })],
     ["#opening-stagger", (v) => meta({ opening: { ...state.project.opening, stagger: Number(v) } })],
-    ["#opening-include-screen", (v, el) => meta({ opening: { ...state.project.opening, include_screen: el.checked } }), "change"],
-    ["#opening-include-camera", (v, el) => meta({ opening: { ...state.project.opening, include_camera: el.checked } }), "change"],
-    ["#opening-include-stickers", (v, el) => meta({ opening: { ...state.project.opening, include_stickers: el.checked } }), "change"],
     ["#zoom-scale", (v) => updateZoom({ scale: Number(v) })],
     ["#zoom-enter", (v) => updateZoom({ enter: Number(v) })],
     ["#zoom-exit", (v) => updateZoom({ exit: Number(v) })],
@@ -1907,7 +1973,14 @@ function bindInspectorFields() {
     ["#sticker-rotation", (v) => updateSticker({ rotation: Number(v) })],
     ["#sticker-opacity", (v) => updateSticker({ opacity: Number(v) })],
     ["#sticker-radius", (v) => updateSticker({ corner_radius: Number(v) })],
+    ["#sticker-border", (v) => updateSticker({ border: Number(v) })],
+    ["#sticker-border-color", (v) => updateSticker({ border_color: v })],
+    ["#sticker-shadow", (v) => updateSticker({ shadow: Number(v) })],
+    ["#sticker-backdrop", (v) => updateSticker({ backdrop_blur: Number(v) })],
     ["#sticker-animation", (v) => updateSticker({ animation: v })],
+    ["#sticker-exit-animation", (v) => updateSticker({ exit_animation: v })],
+    ["#sticker-enter", (v) => updateSticker({ enter: Number(v) })],
+    ["#sticker-exit", (v) => updateSticker({ exit: Number(v) })],
     ["#cursor-size", (v) => meta({ cursor: { ...state.project.cursor, size: Number(v) } })],
     ["#click-effect", (v) => meta({ cursor: { ...state.project.cursor, click_effect: v } })],
     ["#cursor-motion", (v) => meta({ cursor: { ...state.project.cursor, motion: v } })],
@@ -1954,6 +2027,27 @@ function bindInspectorFields() {
     if (!state.selectedSticker) return;
     state.project = await api(`/api/projects/${state.project.id}/stickers/${state.selectedSticker.id}`, { method: "DELETE" });
     state.selectedSticker = null; render();
+  });
+  document.querySelector("#sticker-layer-back")?.addEventListener("click", () => nudgeStickerLayer(-1));
+  document.querySelector("#sticker-layer-front")?.addEventListener("click", () => nudgeStickerLayer(1));
+  document.querySelectorAll("[data-opening-include]").forEach((node) => {
+    node.onchange = () => {
+      const key = `include_${node.dataset.openingInclude}`;
+      meta({ opening: { ...state.project.opening, [key]: node.checked } });
+    };
+  });
+  document.querySelectorAll("[data-opening-move]").forEach((node) => {
+    node.onclick = () => {
+      const id = node.dataset.openingMove;
+      const dir = Number(node.dataset.dir || 0);
+      const order = openingElementOrder(state.project.opening || {});
+      const index = order.indexOf(id);
+      const next = index + dir;
+      if (index < 0 || next < 0 || next >= order.length) return;
+      const swapped = order.slice();
+      [swapped[index], swapped[next]] = [swapped[next], swapped[index]];
+      meta({ opening: { ...state.project.opening, element_order: swapped } });
+    };
   });
   document.querySelectorAll("[data-mosaic-style]").forEach((node) => {
     node.onclick = () => updateMosaic({ style: node.dataset.mosaicStyle });
@@ -2098,6 +2192,83 @@ async function updateMosaic(body) {
 async function updateSticker(body) {
   if (!state.selectedSticker) return;
   await mutate(`/api/projects/${state.project.id}/sticker-update`, { id: state.selectedSticker.id, ...body });
+}
+
+async function nudgeStickerLayer(delta) {
+  if (!state.selectedSticker) return;
+  const stickers = [...(state.project.stickers || [])].sort(
+    (a, b) => Number(a.layer_index || 0) - Number(b.layer_index || 0)
+  );
+  const index = stickers.findIndex((item) => item.id === state.selectedSticker.id);
+  const next = index + delta;
+  if (index < 0 || next < 0 || next >= stickers.length) return;
+  const current = stickers[index];
+  const neighbor = stickers[next];
+  const currentLayer = Number(current.layer_index || index);
+  const neighborLayer = Number(neighbor.layer_index || next);
+  await mutate(`/api/projects/${state.project.id}/sticker-update`, {
+    id: current.id,
+    layer_index: neighborLayer,
+  });
+  await mutate(`/api/projects/${state.project.id}/sticker-update`, {
+    id: neighbor.id,
+    layer_index: currentLayer,
+  });
+}
+
+function copyEffectClipboard() {
+  if (state.selectedZoom) {
+    const zoom = state.project.zooms.find((item) => item.id === state.selectedZoom);
+    if (!zoom) return false;
+    const { id, clip_id, start, end, ...attrs } = zoom;
+    state.effectClipboard = { kind: "zoom", attrs };
+    return true;
+  }
+  if (state.selectedMotion) {
+    const motion = (state.project.screen_motions || []).find((item) => item.id === state.selectedMotion);
+    if (!motion) return false;
+    const { id, clip_id, start, end, ...attrs } = motion;
+    state.effectClipboard = { kind: "motion", attrs };
+    return true;
+  }
+  if (state.selectedMosaic) {
+    const { id, clip_id, start, end, ...attrs } = state.selectedMosaic;
+    state.effectClipboard = { kind: "mosaic", attrs };
+    return true;
+  }
+  if (state.selectedSticker) {
+    const { id, clip_id, start, end, path, layer_index, ...attrs } = state.selectedSticker;
+    state.effectClipboard = { kind: "sticker", attrs };
+    return true;
+  }
+  return false;
+}
+
+function pasteEffectClipboard() {
+  const clip = state.effectClipboard;
+  if (!clip) return false;
+  if (clip.kind === "zoom" && state.selectedZoom) {
+    updateZoom({ ...clip.attrs });
+    toast(state.lang === "zh" ? "已粘贴运镜属性" : "Zoom attributes pasted");
+    return true;
+  }
+  if (clip.kind === "motion" && state.selectedMotion) {
+    updateMotion({ ...clip.attrs });
+    toast(state.lang === "zh" ? "已粘贴 3D 属性" : "Motion attributes pasted");
+    return true;
+  }
+  if (clip.kind === "mosaic" && state.selectedMosaic) {
+    updateMosaic({ ...clip.attrs });
+    toast(state.lang === "zh" ? "已粘贴马赛克属性" : "Mosaic attributes pasted");
+    return true;
+  }
+  if (clip.kind === "sticker" && state.selectedSticker) {
+    updateSticker({ ...clip.attrs });
+    toast(state.lang === "zh" ? "已粘贴贴图属性" : "Sticker attributes pasted");
+    return true;
+  }
+  toast(state.lang === "zh" ? "没有可粘贴的同类效果" : "No compatible effect to paste");
+  return true;
 }
 async function updateClipAudio(body) {
   const clip = Z.locateTimeline(state.project.clips, state.time)?.clip;
@@ -2312,10 +2483,22 @@ function paintCanvas() {
   }
   const opening = project.opening || {};
   if (!state.cropping && opening.enabled && state.time < Number(opening.duration || 1.4)) {
-    const p = state.time / Number(opening.duration || 1.4);
-    const startScale = opening.preset === "sideSlide" ? 0.85 : opening.preset === "light3D" ? 0.92 : 0.72;
-    shell.style.transform += ` scale(${startScale + (1 - startScale) * p})`;
-    if (opening.preset === "light3D") shell.style.transform += ` rotateY(${(-18 + 18 * p)}deg)`;
+    const order = openingElementOrder(opening).filter((id) => {
+      if (id === "screen") return opening.include_screen !== false;
+      if (id === "camera") return opening.include_camera !== false;
+      return opening.include_stickers !== false;
+    });
+    const stagger = Number(opening.stagger ?? 0.12);
+    const screenIndex = Math.max(order.indexOf("screen"), 0);
+    const local = Math.max(state.time - screenIndex * stagger, 0);
+    const span = Math.max(Number(opening.duration || 1.4) - screenIndex * stagger, 0.18);
+    const p = Math.min(local / span, 1);
+    if (opening.include_screen !== false) {
+      const startScale = opening.preset === "sideSlide" ? 0.85 : opening.preset === "light3D" ? 0.92 : 0.72;
+      shell.style.transform += ` scale(${startScale + (1 - startScale) * p})`;
+      if (opening.preset === "light3D") shell.style.transform += ` rotateY(${(-18 + 18 * p)}deg)`;
+      if (opening.preset === "sideSlide") shell.style.transform += ` translateX(${(1 - p) * -8}%)`;
+    }
   }
   placeCursor(state.cropping ? null : Z.locateTimeline(project.clips, state.time), view);
   placeFocusDot(view);
@@ -2483,14 +2666,48 @@ function paintStageOverlays() {
       + `<i class="overlay-handle" data-handle="se"></i><i class="overlay-handle" data-handle="sw"></i></div>`
     );
   }
-  for (const item of (state.project.stickers || []).map(absoluteItem)) {
+  const stickersNow = (state.project.stickers || [])
+    .map(absoluteItem)
+    .sort((a, b) => Number(a.layer_index || 0) - Number(b.layer_index || 0));
+  for (const item of stickersNow) {
     if (state.time < item.start || state.time > item.end) continue;
     const selected = state.selectedSticker && item.id === state.selectedSticker.id;
     const opacity = item.opacity == null ? 1 : item.opacity;
+    const border = Number(item.border || 0);
+    const shadow = item.shadow == null ? 0.28 : Number(item.shadow);
+    const blur = Number(item.backdrop_blur || 0);
+    const enter = Number(item.enter ?? 0.7);
+    const exit = Number(item.exit ?? 0.22);
+    const into = enter > 0 ? Math.min(Math.max((state.time - item.start) / enter, 0), 1) : 1;
+    const outo = exit > 0 ? Math.min(Math.max((item.end - state.time) / exit, 0), 1) : 1;
+    const anim = item.animation || "pop";
+    const exitAnim = item.exit_animation || "none";
+    let animScale = 1;
+    let animOpacity = opacity;
+    let animShift = 0;
+    if (into < 1 && anim !== "none") {
+      animScale = anim === "pop" ? 0.72 + 0.28 * into : 1;
+      animOpacity = anim === "fade" || anim === "pop" ? opacity * into : opacity;
+      animShift = anim === "slide" ? (1 - into) * 18 : 0;
+    } else if (outo < 1 && exitAnim !== "none") {
+      animScale = exitAnim === "pop" ? 0.72 + 0.28 * outo : 1;
+      animOpacity = exitAnim === "fade" || exitAnim === "pop" ? opacity * outo : opacity;
+      animShift = exitAnim === "slide" ? (1 - outo) * -14 : 0;
+    }
+    const filterParts = [];
+    if (shadow > 0.01) filterParts.push(`drop-shadow(0 ${6 + shadow * 10}px ${12 + shadow * 18}px rgba(0,0,0,${0.12 + shadow * 0.4}))`);
+    if (blur > 0) filterParts.push(`blur(0px)`);
     parts.push(
       `<div class="overlay-sticker${selected ? " selected" : ""}" data-overlay="sticker" data-id="${item.id}" `
-      + `style="left:${item.x * 100}%;top:${item.y * 100}%;width:${item.width * 100}%;opacity:${opacity};`
-      + `transform:translate(-50%,-50%) rotate(${item.rotation || 0}deg);border-radius:${item.corner_radius || 18}px">`
+      + `style="left:${item.x * 100}%;top:${item.y * 100}%;width:${item.width * 100}%;opacity:${animOpacity};`
+      + `z-index:${10 + Number(item.layer_index || 0)};`
+      + `transform:translate(-50%,-50%) translateY(${animShift}px) rotate(${item.rotation || 0}deg) scale(${animScale});`
+      + `border-radius:${item.corner_radius || 18}px;`
+      + (border > 0 ? `outline:${border}px solid ${item.border_color || "#fff"};outline-offset:0;` : "")
+      + (filterParts.length ? `filter:${filterParts.join(" ")};` : "")
+      + (blur > 0 ? `--sticker-backdrop:${blur}px;` : "")
+      + `">`
+      + (blur > 0 ? `<i class="sticker-backdrop" style="backdrop-filter:blur(${blur}px);border-radius:inherit"></i>` : "")
       + `<img src="/api/projects/${state.project.id}/${escapeHtml(item.path)}" alt="" draggable="false"></div>`
     );
   }
@@ -2848,17 +3065,84 @@ async function openExportSheet() {
   await refreshExportEstimate();
 }
 
+function selectionExportRange() {
+  const ids = new Set(state.selectedClipIds || []);
+  if (!ids.size || !state.project) return null;
+  const rows = Z.layout(state.project.clips).filter((row) => ids.has(row.id));
+  if (!rows.length) return null;
+  return {
+    start: Math.min(...rows.map((row) => row.start)),
+    end: Math.max(...rows.map((row) => row.start + row.duration)),
+    ids: [...ids],
+  };
+}
+
+function selectTimelineClip(clipId, event) {
+  const additive = event?.metaKey || event?.ctrlKey;
+  const range = event?.shiftKey;
+  const current = state.selectedClipIds || [];
+  if (additive) {
+    state.selectedClipIds = current.includes(clipId)
+      ? current.filter((id) => id !== clipId)
+      : [...current, clipId];
+  } else if (range && current.length) {
+    const rows = Z.layout(state.project.clips);
+    const anchor = current[current.length - 1];
+    const a = rows.findIndex((row) => row.id === anchor);
+    const b = rows.findIndex((row) => row.id === clipId);
+    if (a >= 0 && b >= 0) {
+      const from = Math.min(a, b);
+      const to = Math.max(a, b);
+      state.selectedClipIds = rows.slice(from, to + 1).map((row) => row.id);
+    } else {
+      state.selectedClipIds = [clipId];
+    }
+  } else {
+    state.selectedClipIds = [clipId];
+  }
+  const row = Z.layout(state.project.clips).find((item) => item.id === clipId);
+  if (row) {
+    state.time = row.start + Math.min(0.05, row.duration / 2);
+    state.playing = false;
+    updatePlayButton();
+  }
+  state.selectedZoom = null;
+  state.selectedMotion = null;
+  state.selectedMosaic = null;
+  state.selectedSticker = null;
+  drawTimeline();
+  paintCanvas();
+  syncTransport();
+}
+
 async function refreshExportEstimate() {
   if (!state.project || !state.exportSheet) return;
   try {
+    const exp = state.project.export || {};
+    if (exp.scope === "selection") {
+      const range = selectionExportRange();
+      if (range) {
+        await meta({
+          export: {
+            ...exp,
+            range_start: range.start,
+            range_end: range.end,
+            selected_ids: range.ids,
+          },
+        });
+      }
+    }
     const estimate = await api(`/api/projects/${state.project.id}/export/estimate`);
     if (!state.exportSheet) return;
     state.exportSheet.estimate = estimate;
-    const meta = document.querySelector(".export-meta");
-    if (meta) {
-      meta.innerHTML = `<div><span>${state.lang === "zh" ? "分辨率" : "Size"}</span><strong>${estimate.width}×${estimate.height}</strong></div>
-        <div><span>${state.lang === "zh" ? "时长" : "Duration"}</span><strong>${formatTime(estimate.duration)}</strong></div>
-        <div><span>${state.lang === "zh" ? "估大小" : "Est."}</span><strong>${formatBytes(estimate.bytes)}</strong></div>`;
+    const metaNode = document.querySelector(".export-meta");
+    if (metaNode) {
+      const zh = state.lang === "zh";
+      const kind = estimate.kind || exp.kind || "video";
+      const size = kind === "audio" ? (zh ? "音频" : "Audio") : `${estimate.width}×${estimate.height}`;
+      metaNode.innerHTML = `<div><span>${zh ? "分辨率" : "Size"}</span><strong>${size}</strong></div>
+        <div><span>${zh ? "时长" : "Duration"}</span><strong>${formatTime(estimate.duration)}</strong></div>
+        <div><span>${zh ? "估大小" : "Est."}</span><strong>${formatBytes(estimate.bytes)}</strong></div>`;
     }
   } catch (error) {
     toast(error.message);
@@ -2867,12 +3151,26 @@ async function refreshExportEstimate() {
 
 async function startExportFromSheet() {
   if (!state.exportSheet || !state.project) return;
+  const exp = state.project.export || {};
+  const kind = exp.kind || "video";
+  const scope = exp.scope || "full";
+  const body = { kind, scope };
+  if (scope === "selection") {
+    const range = selectionExportRange();
+    if (!range) {
+      toast(state.lang === "zh" ? "请先多选片段" : "Select clips first");
+      return;
+    }
+    body.range_start = range.start;
+    body.range_end = range.end;
+    body.selected_ids = range.ids;
+  }
   state.exportSheet.state = "running";
   state.exportSheet.progress = 0.02;
   state.exportSheet.error = null;
   render();
   try {
-    await api(`/api/projects/${state.project.id}/export`, { method: "POST", body: {} });
+    await api(`/api/projects/${state.project.id}/export`, { method: "POST", body });
     for (let attempt = 0; attempt < 600; attempt += 1) {
       const status = await api(`/api/projects/${state.project.id}/export/status`);
       if (!state.exportSheet) return;
@@ -2884,8 +3182,9 @@ async function startExportFromSheet() {
         state.exportSheet.state = "done";
         toast(state.lang === "zh" ? "导出完成" : "Export ready");
         const link = document.createElement("a");
+        const suffix = (status.kind || kind) === "audio" ? "m4a" : "mp4";
         link.href = `/api/projects/${state.project.id}/export/file`;
-        link.download = `${state.project.name || "dogsc"}.mp4`;
+        link.download = `${state.project.name || "dogsc"}.${suffix}`;
         document.body.appendChild(link);
         link.click();
         link.remove();
@@ -2954,9 +3253,10 @@ function drawTimeline() {
     ruler.append(mark);
   }
   const locatedClip = Z.locateTimeline(state.project.clips, state.time)?.clip;
+  const selectedIds = new Set(state.selectedClipIds || []);
   const clipLane = makeLane(state.timelineMode === "waveform" ? "波形" : "画面", rows, (lane, row) => {
     const node = document.createElement("div");
-    const selected = locatedClip && locatedClip.id === row.id;
+    const selected = selectedIds.has(row.id) || (!selectedIds.size && locatedClip && locatedClip.id === row.id);
     node.className = `clip${selected ? " selected" : ""}`;
     node.dataset.clipId = row.id;
     node.style.left = `${(row.start / duration) * 100}%`;
@@ -2964,6 +3264,11 @@ function drawTimeline() {
     node.innerHTML = `<span class="handle left"></span><span class="handle right"></span>`;
     node.onpointerenter = () => node.classList.add("hovered");
     node.onpointerleave = () => node.classList.remove("hovered");
+    node.onclick = (event) => {
+      if (event.target.closest(".handle")) return;
+      event.stopPropagation();
+      selectTimelineClip(row.id, event);
+    };
     if (state.timelineMode === "waveform") {
       node.style.background = "linear-gradient(180deg,#3a3d44,#2a2d33)";
       const canvas = document.createElement("canvas");
@@ -3405,11 +3710,86 @@ window.addEventListener("keydown", (event) => {
       });
     }
   }
-  if ((event.key === "Delete" || event.key === "Backspace") && state.view === "editor" && state.selectedMarker) {
-    event.preventDefault();
-    api(`/api/projects/${state.project.id}/marker-delete`, { method: "POST", body: { id: state.selectedMarker } })
-      .then((project) => { state.project = project; state.selectedMarker = null; render(); })
-      .catch((error) => toast(error.message));
+  if ((event.key === "q" || event.key === "w") && state.view === "editor" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    const clip = Z.locateTimeline(state.project.clips, state.time)?.clip;
+    if (clip) {
+      event.preventDefault();
+      mutate(`/api/projects/${state.project.id}/trim`, {
+        id: clip.id,
+        edge: event.key === "q" ? "start" : "end",
+        time: state.time,
+      });
+    }
+  }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "c" && state.view === "editor" && !event.shiftKey && !event.altKey) {
+    if (copyEffectClipboard()) {
+      event.preventDefault();
+      toast(state.lang === "zh" ? "已复制效果属性" : "Effect attributes copied");
+    }
+  }
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "v" && state.view === "editor") {
+    if (pasteEffectClipboard()) event.preventDefault();
+  }
+  if ((event.key === "Delete" || event.key === "Backspace") && state.view === "editor") {
+    if (state.selectedMarker) {
+      event.preventDefault();
+      api(`/api/projects/${state.project.id}/marker-delete`, { method: "POST", body: { id: state.selectedMarker } })
+        .then((project) => { state.project = project; state.selectedMarker = null; render(); })
+        .catch((error) => toast(error.message));
+      return;
+    }
+    if (state.selectedSticker) {
+      event.preventDefault();
+      api(`/api/projects/${state.project.id}/stickers/${state.selectedSticker.id}`, { method: "DELETE" })
+        .then((project) => { state.project = project; state.selectedSticker = null; render(); })
+        .catch((error) => toast(error.message));
+      return;
+    }
+    if (state.selectedMosaic) {
+      event.preventDefault();
+      api(`/api/projects/${state.project.id}/mosaics/${state.selectedMosaic.id}`, { method: "DELETE" })
+        .then((project) => { state.project = project; state.selectedMosaic = null; render(); })
+        .catch((error) => toast(error.message));
+      return;
+    }
+    if (state.selectedZoom) {
+      event.preventDefault();
+      api(`/api/projects/${state.project.id}/zooms/${state.selectedZoom}`, { method: "DELETE" })
+        .then((project) => { state.project = project; state.selectedZoom = null; render(); })
+        .catch((error) => toast(error.message));
+      return;
+    }
+    if (state.selectedMotion) {
+      event.preventDefault();
+      api(`/api/projects/${state.project.id}/screen-motions/${state.selectedMotion}`, { method: "DELETE" })
+        .then((project) => { state.project = project; state.selectedMotion = null; render(); })
+        .catch((error) => toast(error.message));
+      return;
+    }
+    const ids = (state.selectedClipIds || []).filter(Boolean);
+    if (ids.length > 1) {
+      event.preventDefault();
+      api(`/api/projects/${state.project.id}/delete-clips`, { method: "POST", body: { ids } })
+        .then((project) => {
+          state.project = project;
+          state.selectedClipIds = [];
+          render();
+        })
+        .catch((error) => toast(error.message));
+      return;
+    }
+    if (ids.length === 1 || Z.locateTimeline(state.project.clips, state.time)?.clip) {
+      const clipId = ids[0] || Z.locateTimeline(state.project.clips, state.time)?.clip?.id;
+      if (!clipId) return;
+      event.preventDefault();
+      api(`/api/projects/${state.project.id}/delete-clip`, { method: "POST", body: { id: clipId } })
+        .then((project) => {
+          state.project = project;
+          state.selectedClipIds = (state.selectedClipIds || []).filter((id) => id !== clipId);
+          render();
+        })
+        .catch((error) => toast(error.message));
+    }
   }
 });
 

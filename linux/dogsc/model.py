@@ -131,6 +131,21 @@ def blank_camera() -> dict:
     }
 
 
+OPENING_ELEMENTS = ("screen", "camera", "stickers")
+
+
+def normalize_opening_order(order) -> list[str]:
+    seen: list[str] = []
+    for item in order or []:
+        key = str(item)
+        if key in OPENING_ELEMENTS and key not in seen:
+            seen.append(key)
+    for key in OPENING_ELEMENTS:
+        if key not in seen:
+            seen.append(key)
+    return seen
+
+
 def blank_opening() -> dict:
     return {
         "enabled": False,
@@ -141,6 +156,7 @@ def blank_opening() -> dict:
         "include_screen": True,
         "include_camera": True,
         "include_stickers": True,
+        "element_order": list(OPENING_ELEMENTS),
     }
 
 
@@ -203,7 +219,15 @@ def blank_sticker(start: float, end: float, relative_path: str) -> dict:
         "rotation": 0.0,
         "opacity": 1.0,
         "corner_radius": 18,
+        "border": 0,
+        "border_color": "#ffffff",
+        "shadow": 0.28,
+        "backdrop_blur": 0,
+        "layer_index": 0,
+        "enter": 0.7,
+        "exit": 0.22,
         "animation": "pop",
+        "exit_animation": "none",
     }
 
 
@@ -222,10 +246,23 @@ def migrate(project: dict) -> dict:
         project["cursor"]["asset"] = "system.hidden"
     project["audio"] = {**blank_audio(), **(project.get("audio") or {})}
     project["camera"] = {**blank_camera(), **(project.get("camera") or {})}
-    project["opening"] = {**blank_opening(), **(project.get("opening") or {})}
+    opening = {**blank_opening(), **(project.get("opening") or {})}
+    opening["element_order"] = normalize_opening_order(opening.get("element_order"))
+    project["opening"] = opening
     project.setdefault("screen_motions", [])
     project.setdefault("mosaics", [])
-    project.setdefault("stickers", [])
+    stickers = []
+    for index, sticker in enumerate(project.get("stickers") or []):
+        item = dict(sticker or {})
+        base = blank_sticker(
+            float(item.get("start") or 0),
+            float(item.get("end") or 1),
+            str(item.get("path") or ""),
+        )
+        row = {**base, **item}
+        row.setdefault("layer_index", index)
+        stickers.append(row)
+    project["stickers"] = stickers
     project.setdefault("history", [])
     project.setdefault("history_index", -1)
     project.setdefault("deleted_clips", [])
@@ -235,8 +272,12 @@ def migrate(project: dict) -> dict:
         row.setdefault("audio", blank_clip(0, 1)["audio"])
         clips.append(row)
     project["clips"] = clips
-    export = {"resolution": "1080p", "fps": 30}
+    export = {"resolution": "1080p", "fps": 30, "kind": "video", "scope": "full"}
     export.update(project.get("export") or {})
+    kind = str(export.get("kind") or "video")
+    export["kind"] = kind if kind in {"video", "audio"} else "video"
+    scope = str(export.get("scope") or "full")
+    export["scope"] = scope if scope in {"full", "selection"} else "full"
     project["export"] = export
     project.setdefault("draw_cursor", True)
     return project

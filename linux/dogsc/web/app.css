@@ -798,12 +798,27 @@ input[type="range"]::-moz-range-thumb {
   position: absolute;
   filter: drop-shadow(0 8px 18px rgba(0,0,0,0.28));
 }
+.overlay-sticker .sticker-backdrop {
+  position: absolute; inset: -18%; pointer-events: none; z-index: 0;
+  background: rgba(255,255,255,0.02);
+}
 .overlay-sticker img {
+  position: relative; z-index: 1;
   width: 100%; height: auto; display: block; pointer-events: none;
   border-radius: inherit;
 }
 .overlay-sticker.selected {
   outline: 2px solid #fff; outline-offset: 2px;
+}
+.opening-order { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.opening-order-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 10px; border-radius: 10px; background: var(--well);
+}
+.opening-order-row.is-off { opacity: 0.55; }
+.opening-order-actions { display: flex; gap: 4px; }
+.opening-order-actions .btn {
+  min-width: 28px; padding: 4px 8px; border-radius: 8px;
 }
 .hover-playhead {
   position: absolute; top: 0; bottom: 0; width: 0; z-index: 4;
