@@ -14,6 +14,9 @@ const state = {
   selectedSticker: null,
   selectedClipIds: [],
   effectClipboard: null,
+  presets: [],
+  presetDefaultId: null,
+  activePresetId: null,
   tab: "frame",
   frameTab: "background",
   bgTab: "wallpaper",
@@ -1011,6 +1014,30 @@ function timelineBarHtml() {
   </div>`;
 }
 
+function scenePresetMenuHtml() {
+  if (state.hudMenu !== "presets") return "";
+  const zh = state.lang === "zh";
+  const presets = state.presets || [];
+  const rows = presets.length
+    ? presets.map((preset) => `
+      <div class="preset-row ${preset.id === state.activePresetId ? "active" : ""}">
+        <button type="button" class="preset-apply" data-preset-apply="${preset.id}">
+          <strong>${escapeHtml(preset.name)}</strong>
+          ${preset.id === state.presetDefaultId ? `<em>${zh ? "默认" : "Default"}</em>` : ""}
+        </button>
+        <button type="button" class="btn ghost" data-preset-default="${preset.id}" title="${zh ? "设为新录制默认" : "Default for new recordings"}">${preset.id === state.presetDefaultId ? "★" : "☆"}</button>
+        <button type="button" class="btn ghost" data-preset-delete="${preset.id}" title="${t("delete")}">×</button>
+      </div>`).join("")
+    : `<p class="note">${zh ? "还没有场景预设。保存当前画面+开场+光标+摄像头外观。" : "No scene presets yet. Save canvas, opening, cursor, and camera style."}</p>`;
+  return `<aside class="preset-menu island" id="preset-menu" role="dialog" aria-label="${zh ? "场景预设" : "Scene presets"}">
+    <div class="section-title">${zh ? "场景预设" : "Scene presets"}</div>
+    <div class="preset-list">${rows}</div>
+    <div class="preset-actions">
+      <button class="btn primary" id="preset-save">${zh ? "保存当前场景" : "Save current"}</button>
+    </div>
+  </aside>`;
+}
+
 function exportSheetHtml() {
   const sheet = state.exportSheet;
   if (!sheet) return "";
@@ -1065,6 +1092,10 @@ function editorHtml() {
       </div>
       <div class="top-trailing">
         <button class="btn icon" id="lang" title="${t("lang")}">${t("lang") === "English" ? "EN" : "中"}</button>
+        <div class="preset-anchor">
+          <button class="btn" id="preset-btn" title="${state.lang === "zh" ? "场景预设" : "Scene presets"}" ${state.cropping ? "disabled" : ""} aria-expanded="${state.hudMenu === "presets"}">${state.lang === "zh" ? "场景" : "Scene"}${ICONS.chevronDown}</button>
+          ${scenePresetMenuHtml()}
+        </div>
         <button class="btn icon" id="settings-btn" title="${state.lang === "zh" ? "快捷键" : "Shortcuts"}" aria-expanded="${state.hudMenu === "shortcuts"}">${ICONS.gear}</button>
         <button class="btn icon danger" id="delete-project" title="${t("delete")}" ${state.cropping ? "disabled" : ""}>${ICONS.trash}</button>
         <span class="toolbar-divider"></span>
@@ -1610,12 +1641,95 @@ function dismissRecorderPopover(event) {
 
 function dismissHudMenu(event) {
   if (!state.hudMenu) return;
-  if (event.target.closest("#shortcuts-panel, #settings-btn, .hud-menu, #aspect-btn, #add-btn, #preview-btn")) {
+  if (event.target.closest("#shortcuts-panel, #settings-btn, #preset-btn, #preset-menu, .hud-menu, #aspect-btn, #add-btn, #preview-btn")) {
     document.addEventListener("pointerdown", dismissHudMenu, { once: true });
     return;
   }
   state.hudMenu = null;
   render();
+}
+
+async function loadPresets() {
+  try {
+    const store = await api("/api/presets");
+    state.presets = store.presets || [];
+    state.presetDefaultId = store.default_id || null;
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function saveScenePreset() {
+  if (!state.project) return;
+  const zh = state.lang === "zh";
+  const suggested = state.activePresetId
+    ? (state.presets.find((item) => item.id === state.activePresetId)?.name || "")
+    : `${zh ? "场景" : "Scene"} ${(state.presets?.length || 0) + 1}`;
+  const name = prompt(zh ? "场景预设名称" : "Scene preset name", suggested);
+  if (name == null) return;
+  try {
+    const body = {
+      project_id: state.project.id,
+      name,
+    };
+    if (state.activePresetId && state.presets.some((item) => item.id === state.activePresetId && item.name === name.trim())) {
+      body.id = state.activePresetId;
+    }
+    const store = await api("/api/presets", { method: "POST", body });
+    state.presets = store.presets || [];
+    state.presetDefaultId = store.default_id || null;
+    const saved = state.presets.find((item) => item.name === name.trim()) || state.presets.at(-1);
+    state.activePresetId = saved?.id || null;
+    toast(zh ? "场景预设已保存" : "Scene preset saved");
+    render();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function applyScenePreset(presetId) {
+  if (!state.project || !presetId) return;
+  try {
+    state.project = await api(`/api/projects/${state.project.id}/apply-preset`, {
+      method: "POST",
+      body: { id: presetId },
+    });
+    state.activePresetId = presetId;
+    state.hudMenu = null;
+    toast(state.lang === "zh" ? "已应用场景预设" : "Scene preset applied");
+    render();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function setScenePresetDefault(presetId) {
+  try {
+    const next = state.presetDefaultId === presetId ? null : presetId;
+    const store = await api("/api/presets", {
+      method: "POST",
+      body: { action: "default", id: next },
+    });
+    state.presets = store.presets || [];
+    state.presetDefaultId = store.default_id || null;
+    render();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function deleteScenePreset(presetId) {
+  if (!presetId) return;
+  if (!confirm(state.lang === "zh" ? "删除这个场景预设？" : "Delete this scene preset?")) return;
+  try {
+    const store = await api(`/api/presets/${presetId}`, { method: "DELETE" });
+    state.presets = store.presets || [];
+    state.presetDefaultId = store.default_id || null;
+    if (state.activePresetId === presetId) state.activePresetId = null;
+    render();
+  } catch (error) {
+    toast(error.message);
+  }
 }
 
 function bind() {
@@ -1649,6 +1763,26 @@ function bind() {
   document.querySelector("#settings-btn")?.addEventListener("click", () => {
     state.hudMenu = state.hudMenu === "shortcuts" ? null : "shortcuts";
     render();
+  });
+  document.querySelector("#preset-btn")?.addEventListener("click", async () => {
+    if (state.hudMenu === "presets") {
+      state.hudMenu = null;
+      render();
+      return;
+    }
+    await loadPresets();
+    state.hudMenu = "presets";
+    render();
+  });
+  document.querySelector("#preset-save")?.addEventListener("click", saveScenePreset);
+  document.querySelectorAll("[data-preset-apply]").forEach((node) => {
+    node.onclick = () => applyScenePreset(node.dataset.presetApply);
+  });
+  document.querySelectorAll("[data-preset-default]").forEach((node) => {
+    node.onclick = () => setScenePresetDefault(node.dataset.presetDefault);
+  });
+  document.querySelectorAll("[data-preset-delete]").forEach((node) => {
+    node.onclick = () => deleteScenePreset(node.dataset.presetDelete);
   });
   if (state.hudMenu) document.addEventListener("pointerdown", dismissHudMenu, { once: true });
   document.querySelector("#undo").onclick = () => mutate(`/api/projects/${state.project.id}/undo`, {});
@@ -3812,6 +3946,7 @@ async function boot() {
     state.env = await api("/api/environment");
     state.projects = await api("/api/projects");
     await loadSources();
+    await loadPresets();
     ensureWallpapers();
   } catch (error) {
     toast(error.message);

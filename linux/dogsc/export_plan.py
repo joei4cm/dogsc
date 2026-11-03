@@ -11,6 +11,47 @@ from dogsc.model import clamp_crop
 from dogsc.zoom import absolute_zooms, clip_duration, sample, viewport
 
 
+def focus_effect_filters(zooms: list[dict], source: str, content_w: int, content_h: int) -> tuple[list[str], str]:
+    """Approximate Apple FocusEffect: blurred/dimmed field with a soft clear disc."""
+    current = source
+    parts: list[str] = []
+    for index, zoom in enumerate(zooms):
+        effect = zoom.get("focus_effect")
+        if not isinstance(effect, dict):
+            continue
+        start = float(zoom.get("start") or 0)
+        end = float(zoom.get("end") or start) + float(zoom.get("exit") or 0)
+        if end - start < 0.05:
+            continue
+        size = min(max(float(effect.get("size") or 0.45), 0.1), 1.0)
+        blur_strength = min(max(float(effect.get("blur") or 0.35), 0), 1.0)
+        soft = min(max(float(effect.get("softness") or 0.5), 0), 1.0)
+        dim = min(max(float(effect.get("dimming") or 0.18), 0), 0.8)
+        blur = max(int(4 + 32 * blur_strength), 2)
+        radius = max(min(content_w, content_h) * size * 0.5, 8)
+        feather = max(radius * (0.15 + soft * 0.55), 4)
+        # After zoom framing the authored focus sits near the content center.
+        cx = content_w * 0.5
+        cy = content_h * 0.5
+        outer = radius + feather
+        next_label = f"focus{index}"
+        enable = f"between({time_token()},{start:.3f},{end:.3f})"
+        # Soft radial mix: keep sharp disc, blend to blurred+dimmed field.
+        mix = (
+            f"if(lt(hypot(X-{cx:.1f},Y-{cy:.1f}),{radius:.1f}),A,"
+            f"if(gt(hypot(X-{cx:.1f},Y-{cy:.1f}),{outer:.1f}),B,"
+            f"A*(1-(hypot(X-{cx:.1f},Y-{cy:.1f})-{radius:.1f})/{feather:.1f})"
+            f"+B*((hypot(X-{cx:.1f},Y-{cy:.1f})-{radius:.1f})/{feather:.1f})))"
+        )
+        parts.append(
+            f"[{current}]split[fes{index}][feb{index}];"
+            f"[feb{index}]boxblur={blur}:2,eq=brightness=-{dim:.3f}[feblur{index}];"
+            f"[fes{index}][feblur{index}]blend=all_expr='{mix}':enable='{enable}'[{next_label}]"
+        )
+        current = next_label
+    return parts, current
+
+
 def even(value: float) -> int:
     number = int(round(value))
     number -= number % 2
@@ -525,14 +566,19 @@ def build_export(project: dict, media: Path, pointer: list[dict], output: Path, 
         f"[{current}]fps={fps},{crop_filter(zooms, box['content_w'], box['content_h'])}"
         f"{motion_filter},format=rgba[framed]"
     )
+    current = "framed"
+    focus_parts, current = focus_effect_filters(zooms, current, box["content_w"], box["content_h"])
+    graph.extend(focus_parts)
+    if current != "framed":
+        # Keep a stable label for opening / placement when focus filters ran.
+        graph.append(f"[{current}]format=rgba[focused]")
+        current = "focused"
 
     duration = max(sum(clip_duration(clip) for clip in project["clips"]), 0.1)
     opening = project.get("opening") or {}
     if opening.get("enabled"):
-        graph.append(_opening_filter("framed", "opened", opening, duration, box["content_w"], box["content_h"]))
+        graph.append(_opening_filter(current, "opened", opening, duration, box["content_w"], box["content_h"]))
         current = "opened"
-    else:
-        current = "framed"
 
     graph.append(f"[{bg_index}:v]scale={canvas_w}:{canvas_h},format=rgba[bg]")
     base = "bg"

@@ -49,7 +49,7 @@
 | G39 | 录制倒计时 | Soft Silver countdown orb | **已落地** Off/3s/5s + 大号 orb |
 | G40 | 录制丢弃 / 停录决策 | discard + save&edit sheet | **已落地** live 丢弃 API + 停录决策岛 |
 | G41 | 标记列表面板 | Marker list seek/rename/delete | **已落地** 时间线 chip + 面板 |
-| G42 | 运镜焦点虚化 | FocusEffect radial | **已落地** 预览 radial blur/dim（导出滤镜后续） |
+| G42 | 运镜焦点虚化 | FocusEffect radial | **已落地** 预览 radial + 导出 soft disc blur/dim |
 | G43 | 贴纸完整 inspector | animation/exit/backdrop/边框阴影/层级 | **已落地** border/色/阴影/backdrop/层级/入退场；导出 border+层级 |
 | G44 | 开场序列编排 | 元素 include / order / stagger | **已落地** stagger + include + 元素顺序上下移；预览跟顺序错峰 |
 | G45 | 片段级音频覆写 | 选中 clip 的 system/mic 音量与静音 | **已落地** `clip-audio` API + 声音检查器覆写 |
@@ -59,7 +59,7 @@
 | G49 | 录制暂停 / 继续 | pause + resume | **已落地** SIGSTOP/CONT + live capsule 暂停钮 |
 | G50 | 马赛克 inspector 补齐 | style / dimming / 几何 | **已落地** 柔化/突出 + 暗度/圆角/宽高；预览 spotlight |
 | G51 | 摄像头 PiP inspector 补齐 | border / opacity / roundness / shadow | **已落地** 圆角/描边/色/透明/阴影旋钮 |
-| G52 | 场景 / 样式预设 | 保存/套用 canvas+opening 包 | **待办** 无 preset store |
+| G52 | 场景 / 样式预设 | 保存/套用 canvas+opening 包 | **已落地** 全局 style-presets store；保存/套用/默认/删除；含 canvas+opening+cursor+audio+camera 外观 |
 
 ## P2+ 与原生毕业路径
 
@@ -70,7 +70,7 @@
 | Ubuntu Wayland 采集 | **xdg-desktop-portal + PipeWire**（已有）/ GTK4+GStreamer | 门户契合度最高 |
 | 指针轨迹 | **libinput** / portal remote desktop | 浏览器拿不到 CGEvent 级流 |
 
-**结论：** Web Soft Silver 已收齐本轮可复刻块（G09–G51，含 **G43–G48**）。首页录制岛为舞台主角；编辑器 docked chrome。下一优先：**G52 场景预设**；导出侧 FocusEffect blur、iPhone Continuity、Metal 预览不在 Web 桥范围。P0 预览真相源 / continuous / 浮动录制窗最优解仍是 **Qt6-QML-Vulkan**。
+**结论：** Web Soft Silver 已收齐本轮可复刻块（**G09–G52**）。首页录制岛为舞台主角；编辑器 docked chrome。Web 桥侧开项已清零；iPhone Continuity、Metal 预览、真 continuous NSPanel 仍明示不在 Web 桥范围。P0 预览真相源 / continuous / 浮动录制窗最优解仍是 **Qt6-QML-Vulkan**。
 
 ## Oil Pro 视觉复拍（本轮）
 
@@ -81,4 +81,5 @@
 | Apple parity 基线 | `.oil-ui/apple-parity/` |
 | 倒计时 / 标记 / 焦点虚化 | `.oil-ui/apple-parity-polish/` |
 | 开场顺序 / 导出选区 / QW | `.oil-ui/apple-parity-polish/{opening-order,export-scope,shortcuts-qw}/` |
+| 场景预设 | `.oil-ui/apple-parity-polish/scene-presets/` |
 | 诊断 | `.oil-ui/apple-parity-polish/diagnosis.md` |

@@ -13,9 +13,10 @@ import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from dogsc.export_plan import build_audio_export, build_export, camera_pip_layout, canvas_size, estimate_export, export_window, preview_sample
+from dogsc.export_plan import build_audio_export, build_export, camera_pip_layout, canvas_size, estimate_export, export_window, focus_effect_filters, preview_sample
 from dogsc.media import probe
 from dogsc.model import blank_sticker, clamp_crop, migrate, normalize_opening_order
+from dogsc.presets import apply_preset_to_project, snapshot_from_project, upsert_preset
 from dogsc.platform import Toolchain, choose_backend, classify_audio, family_of, parse_os_release, parse_pactl_sources, session_of
 from dogsc.portal import parse_node_id
 from dogsc.project import import_media
@@ -623,6 +624,75 @@ class AppleParityBatchTests(unittest.TestCase):
             command = build_audio_export(project, media, root / "out.m4a")
             self.assertIn("-vn", command)
             self.assertTrue(any(part.endswith("out.m4a") for part in command))
+
+    def test_scene_preset_roundtrip(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            os.environ["DOGSC_HOME"] = str(Path(temporary) / "home")
+            project = create_demo()
+            project["canvas"]["padding"] = 0.12
+            project["canvas"]["radius"] = 36
+            project["opening"]["enabled"] = True
+            project["opening"]["preset"] = "light3D"
+            from dogsc.project import save
+            save(project)
+            preset = snapshot_from_project(project, "演示场景")
+            store = upsert_preset(preset)
+            self.assertEqual(len(store["presets"]), 1)
+            self.assertEqual(store["presets"][0]["canvas"]["padding"], 0.12)
+
+            other = migrate({
+                "id": "other",
+                "name": "other",
+                "clips": project["clips"],
+                "media": project["media"],
+                "canvas": {"padding": 0.02, "radius": 0, "aspect": "16:9"},
+                "opening": {"enabled": False},
+                "camera": {"enabled": False, "media": "camera.mp4"},
+            })
+            applied = apply_preset_to_project(other, store["presets"][0])
+            self.assertEqual(applied["canvas"]["padding"], 0.12)
+            self.assertEqual(applied["canvas"]["radius"], 36)
+            self.assertTrue(applied["opening"]["enabled"])
+            self.assertEqual(applied["opening"]["preset"], "light3D")
+            self.assertEqual(applied["camera"]["media"], "camera.mp4")
+
+            server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                port = server.server_address[1]
+                listed = json.load(urllib.request.urlopen(f"http://127.0.0.1:{port}/api/presets", timeout=5))
+                self.assertEqual(len(listed["presets"]), 1)
+                body = json.dumps({"id": listed["presets"][0]["id"]}).encode()
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/api/projects/{project['id']}/apply-preset",
+                    data=body,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                updated = json.load(urllib.request.urlopen(request, timeout=5))
+                self.assertEqual(updated["canvas"]["padding"], 0.12)
+                delete_request = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/api/presets/{listed['presets'][0]['id']}",
+                    method="DELETE",
+                )
+                cleared = json.load(urllib.request.urlopen(delete_request, timeout=5))
+                self.assertEqual(cleared["presets"], [])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+    def test_focus_effect_export_filter(self):
+        zooms = [{
+            "start": 0.5, "end": 2.0, "exit": 0.2, "focus_x": 0.5, "focus_y": 0.5,
+            "focus_effect": {"size": 0.4, "blur": 0.5, "softness": 0.4, "dimming": 0.2},
+        }]
+        parts, label = focus_effect_filters(zooms, "framed", 640, 360)
+        self.assertTrue(parts)
+        self.assertIn("blend=all_expr", parts[0])
+        self.assertIn("boxblur=", parts[0])
+        self.assertEqual(label, "focus0")
 
 
 if __name__ == "__main__":

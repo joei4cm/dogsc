@@ -13,6 +13,15 @@ import webbrowser
 from dogsc.errors import DogSCError
 from dogsc.export_plan import build_export, estimate_export
 from dogsc.media import audio_peaks, probe, thumb_at
+from dogsc.presets import (
+    apply_preset_to_project,
+    delete_preset,
+    get_preset,
+    list_presets,
+    set_default_preset,
+    snapshot_from_project,
+    upsert_preset,
+)
 from dogsc.model import (
     ASPECTS,
     BACKGROUND_KINDS,
@@ -111,6 +120,8 @@ class Handler(BaseHTTPRequestHandler):
                 if target is None:
                     return self._error(404, "没有这张壁纸。")
                 return self._file(target, mimetypes.guess_type(target.name)[0] or "image/jpeg")
+            if path == "/api/presets":
+                return self._json(list_presets())
             if path.startswith("/api/projects/"):
                 return self._project_get(path)
             if path == "/" or path == "":
@@ -156,6 +167,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(APP.recorder.mark(str(body.get("label") or "")))
             if path == "/api/record/region":
                 return self._json(pick_region_for(detect()))
+            if path == "/api/presets":
+                return self._json(self._presets_post())
+            if path.startswith("/api/presets/"):
+                return self._json(self._preset_action(path))
             if path.startswith("/api/projects/"):
                 return self._project_post(path)
             return self._error(404, "没有这个接口。")
@@ -170,6 +185,8 @@ class Handler(BaseHTTPRequestHandler):
         path = unquote(urlparse(self.path).path)
         try:
             parts = [part for part in path.split("/") if part]
+            if len(parts) == 3 and parts[:2] == ["api", "presets"]:
+                return self._json(delete_preset(parts[2]))
             if len(parts) == 3 and parts[:2] == ["api", "projects"]:
                 delete(parts[2])
                 return self._json({"ok": True})
@@ -376,10 +393,34 @@ class Handler(BaseHTTPRequestHandler):
             })
         elif action == "export":
             return self._json(_start_export(project, body))
+        elif action == "apply-preset":
+            preset = get_preset(str(body.get("id") or ""))
+            project = apply_preset_to_project(project, preset)
         else:
             return self._error(404, "没有这个操作。")
         save(project)
         return self._json(project)
+
+    def _presets_post(self) -> dict:
+        body = self._body()
+        action = str(body.get("action") or "save")
+        if action == "default":
+            preset_id = body.get("id")
+            return set_default_preset(str(preset_id) if preset_id else None)
+        project_id = str(body.get("project_id") or "")
+        if not project_id:
+            raise DogSCError("保存场景预设需要项目。")
+        project = migrate(load(project_id))
+        preset_id = str(body["id"]) if body.get("id") else None
+        preset = snapshot_from_project(project, str(body.get("name") or ""), preset_id)
+        return upsert_preset(preset)
+
+    def _preset_action(self, path: str) -> dict:
+        parts = [part for part in path.split("/") if part]
+        # /api/presets/<id>/default
+        if len(parts) >= 4 and parts[3] == "default":
+            return set_default_preset(parts[2])
+        raise DogSCError("没有这个预设操作。")
 
     def _sticker_upload(self, project: dict) -> dict:
         content_type = self.headers.get("Content-Type", "")
