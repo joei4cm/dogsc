@@ -12,6 +12,11 @@ const state = {
   selectedMotion: null,
   selectedMosaic: null,
   selectedSticker: null,
+  selectedClipIds: [],
+  effectClipboard: null,
+  presets: [],
+  presetDefaultId: null,
+  activePresetId: null,
   tab: "frame",
   frameTab: "background",
   bgTab: "wallpaper",
@@ -29,9 +34,13 @@ const state = {
     cameraDevice: null,
     phoneId: null,
     phonePlatform: null,
+    countdown: Number(localStorage.getItem("dogsc-countdown") || 3),
   },
   sources: { displays: [], windows: [], cameras: [], phones: [], capabilities: {} },
   recording: { active: false, elapsed: 0 },
+  countdown: null,
+  recordDecision: null,
+  markerList: false,
   recorderPopover: null,
   hudMenu: null,
   cropping: false,
@@ -254,6 +263,20 @@ const STR = {
     start: "开始",
     stop: "停止并剪辑",
     marker: "标记",
+    markers: "录制标记",
+    markersHint: "快速找回重点与重录位置",
+    markersEmpty: "还没有标记。录制中或时间线上可添加。",
+    markersFooter: "点击定位 · 双击改名 · Delete 删除",
+    discard: "丢弃",
+    saveEdit: "保存并剪辑",
+    recordDone: "录制完成",
+    recordDoneLead: "要打开 Soft Silver 时间线，还是丢掉这段？",
+    countdown: "倒计时",
+    focusEffect: "焦点虚化",
+    focusSize: "清晰范围",
+    focusBlur: "模糊程度",
+    focusSoftness: "羽化",
+    focusDim: "暗角",
     back: "项目",
     split: "分割",
     auto: "按点击生成运镜",
@@ -349,6 +372,20 @@ const STR = {
     start: "Start",
     stop: "Stop and edit",
     marker: "Marker",
+    markers: "Markers",
+    markersHint: "Jump back to key moments",
+    markersEmpty: "No markers yet. Add one while recording or on the timeline.",
+    markersFooter: "Click to seek · Double-click to rename · Delete to remove",
+    discard: "Discard",
+    saveEdit: "Save & edit",
+    recordDone: "Recording finished",
+    recordDoneLead: "Open the Soft Silver timeline, or discard this take?",
+    countdown: "Countdown",
+    focusEffect: "Focus blur",
+    focusSize: "Clear size",
+    focusBlur: "Blur",
+    focusSoftness: "Softness",
+    focusDim: "Dimming",
     back: "Projects",
     split: "Split",
     auto: "Zoom from clicks",
@@ -468,6 +505,10 @@ function shortcutHint(action) {
     split: "S",
     back: "Esc",
     export: `${mod}+E`,
+    trimIn: "Q",
+    trimOut: "W",
+    copyEffect: `${mod}+C`,
+    pasteEffect: `${mod}+Shift+V`,
   };
   return map[action] || "";
 }
@@ -497,6 +538,13 @@ function closeFloatingUI() {
   if (state.recorderPopover) { state.recorderPopover = null; changed = true; }
   if (state.hudMenu) { state.hudMenu = null; changed = true; }
   if (state.trackMenu) { state.trackMenu = false; changed = true; }
+  if (state.markerList) { state.markerList = false; changed = true; }
+  if (state.countdown != null) {
+    clearCountdown();
+    countdownToken += 1;
+    state.countdown = null;
+    changed = true;
+  }
   if (state.exportSheet && state.exportSheet.state !== "running") {
     state.exportSheet = null;
     changed = true;
@@ -656,11 +704,31 @@ function parityNoteHtml() {
 function recorderCapsuleHtml() {
   const source = state.record.source;
   const live = state.recording.active;
-  if (live) {
+  if (state.countdown != null) {
     return `<div class="recorder-dock">
-      <div class="recorder-capsule is-live" data-mode="live">
-        <div class="recording-timer" id="elapsed">${formatTime(state.recording.elapsed)}</div>
+      <div class="countdown-orb" aria-live="polite">${state.countdown}</div>
+    </div>`;
+  }
+  if (state.recordDecision) {
+    return `<div class="recorder-dock">
+      <aside class="record-decision island" role="dialog" aria-label="${t("recordDone")}">
+        <strong>${t("recordDone")}</strong>
+        <p>${t("recordDoneLead")}</p>
+        <div class="record-decision-actions">
+          <button class="btn ghost" id="discard-record">${t("discard")}</button>
+          <button class="btn primary" id="save-record">${t("saveEdit")}</button>
+        </div>
+      </aside>
+    </div>`;
+  }
+  if (live) {
+    const paused = !!state.recording.paused;
+    return `<div class="recorder-dock">
+      <div class="recorder-capsule is-live ${paused ? "is-paused" : ""}" data-mode="live">
+        <div class="recording-timer" id="elapsed">${formatTime(state.recording.elapsed)}${paused ? `<em>${state.lang === "zh" ? "已暂停" : "Paused"}</em>` : ""}</div>
+        <button class="rec-toggle" id="toggle-pause" title="${paused ? t("playing") : t("pause")}" aria-pressed="${paused}">${paused ? ICONS.play : ICONS.pause}</button>
         <button class="rec-toggle" id="add-marker" title="${t("marker")}">${ICONS.marker}</button>
+        <button class="rec-toggle danger-quiet" id="discard-live" title="${t("discard")}">${ICONS.trash}</button>
         <button class="record-go live" id="stop-record" title="${t("stop")}"><span class="dot"><i></i></span></button>
       </div>
     </div>`;
@@ -732,6 +800,13 @@ function recorderCapsuleHtml() {
       <div class="section-title">${t("settings")}</div>
       <label class="field">${t("fps")}
         <select id="fps"><option ${state.record.fps === 30 ? "selected" : ""}>30</option><option ${state.record.fps === 60 ? "selected" : ""}>60</option></select>
+      </label>
+      <label class="field">${t("countdown")}
+        <select id="countdown-sel">
+          <option value="0" ${Number(state.record.countdown) === 0 ? "selected" : ""}>${state.lang === "zh" ? "关" : "Off"}</option>
+          <option value="3" ${Number(state.record.countdown) === 3 ? "selected" : ""}>3s</option>
+          <option value="5" ${Number(state.record.countdown) === 5 ? "selected" : ""}>5s</option>
+        </select>
       </label>
       <div class="actions" style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
         <button class="btn" id="go-demo">${t("demo")}</button>
@@ -827,9 +902,14 @@ function stageHudHtml(project) {
     <div class="shortcut-row"><span>${t("undo")}</span><kbd>${shortcutHint("undo")}</kbd></div>
     <div class="shortcut-row"><span>${t("redo")}</span><kbd>${shortcutHint("redo")}</kbd></div>
     <div class="shortcut-row"><span>${t("split")}</span><kbd>${shortcutHint("split")}</kbd></div>
+    <div class="shortcut-row"><span>${state.lang === "zh" ? "修剪入点" : "Trim in"}</span><kbd>${shortcutHint("trimIn")}</kbd></div>
+    <div class="shortcut-row"><span>${state.lang === "zh" ? "修剪出点" : "Trim out"}</span><kbd>${shortcutHint("trimOut")}</kbd></div>
+    <div class="shortcut-row"><span>${state.lang === "zh" ? "复制效果属性" : "Copy effect"}</span><kbd>${shortcutHint("copyEffect")}</kbd></div>
+    <div class="shortcut-row"><span>${state.lang === "zh" ? "粘贴效果属性" : "Paste effect"}</span><kbd>${shortcutHint("pasteEffect")}</kbd></div>
     <div class="shortcut-row"><span>${state.lang === "zh" ? "微调 / 跳秒" : "Nudge / Jump"}</span><kbd>← → · ⇧</kbd></div>
     <div class="shortcut-row"><span>${state.lang === "zh" ? "逐帧" : "Frame step"}</span><kbd>, .</kbd></div>
     <div class="shortcut-row"><span>${state.lang === "zh" ? "片段前后移" : "Reorder clip"}</span><kbd>[ ]</kbd></div>
+    <div class="shortcut-row"><span>${state.lang === "zh" ? "多选片段" : "Multi-select"}</span><kbd>⇧ / ${modKey()}</kbd></div>
     <div class="shortcut-row"><span>${state.lang === "zh" ? "删除选中" : "Delete"}</span><kbd>Delete</kbd></div>
     <div class="shortcut-row"><span>${state.lang === "zh" ? "关闭浮层" : "Dismiss"}</span><kbd>${shortcutHint("back")}</kbd></div>
   </aside>` : "";
@@ -863,6 +943,39 @@ function stageHudHtml(project) {
   </div>`;
 }
 
+function markerAbsoluteTime(marker) {
+  const rows = Z.layout(state.project?.clips || []);
+  const row = rows.find((item) => item.id === marker.clip_id);
+  if (!row) return Number(marker.local || 0);
+  return row.start + Number(marker.local || 0);
+}
+
+function markerListHtml() {
+  const markers = [...(state.project?.markers || [])].sort((a, b) => markerAbsoluteTime(a) - markerAbsoluteTime(b));
+  const rows = markers.map((marker) => {
+    const abs = markerAbsoluteTime(marker);
+    return `<button type="button" class="marker-row ${state.selectedMarker === marker.id ? "active" : ""}" data-marker-seek="${escapeHtml(marker.id)}">
+      <span class="marker-row-copy">
+        <strong>${escapeHtml(marker.label || t("marker"))}</strong>
+        <em>${formatTime(abs)}</em>
+      </span>
+      <span class="marker-row-del" data-marker-del="${escapeHtml(marker.id)}" title="${t("delete")}">${ICONS.trash}</span>
+    </button>`;
+  }).join("");
+  return `<div class="marker-list island" id="marker-list" role="dialog" aria-label="${t("markers")}">
+    <div class="marker-list-head">
+      <div>
+        <strong>${t("markers")}</strong>
+        <em>${markers.length}</em>
+        <p>${t("markersHint")}</p>
+      </div>
+      <button type="button" class="tl-tool" id="marker-list-close" aria-label="${state.lang === "zh" ? "关闭" : "Close"}">×</button>
+    </div>
+    <div class="marker-list-body">${rows || `<p class="note">${t("markersEmpty")}</p>`}</div>
+    <div class="marker-list-foot">${t("markersFooter")}</div>
+  </div>`;
+}
+
 function timelineBarHtml() {
   const tracks = state.trackVisibility;
   const trackMenu = state.trackMenu ? `<div class="track-menu island" id="track-menu" role="menu">
@@ -871,11 +984,18 @@ function timelineBarHtml() {
       <button type="button" data-track="mosaic" aria-pressed="${tracks.mosaic !== false}"><span>${t("trackMosaic")}</span><em>${tracks.mosaic !== false ? "●" : "○"}</em></button>
       <button type="button" data-track="sticker" aria-pressed="${tracks.sticker !== false}"><span>${t("trackSticker")}</span><em>${tracks.sticker !== false ? "●" : "○"}</em></button>
     </div>` : "";
+  const markerMenu = state.markerList ? markerListHtml() : "";
   return `<div class="timeline-bar">
     <button class="tl-tool" id="split" title="${t("split")} · ${shortcutHint("split")}">${ICONS.scissors}</button>
     <button class="tl-tool" id="delete-selection" title="${t("delete")} · Delete">${ICONS.trash}</button>
     <button class="tl-tool" id="restore-cuts" title="${t("restoreCuts")}">${ICONS.restore}</button>
     <button class="tl-tool" id="add-edit-marker" title="${t("marker")}">${ICONS.marker}</button>
+    <div class="tl-markers">
+      <button class="tl-tool marker-chip ${state.markerList ? "active" : ""}" id="marker-list-btn" title="${t("markers")}" aria-expanded="${state.markerList}">
+        ${ICONS.marker}<span>${t("markers")}</span><em>${(state.project?.markers || []).length}</em>
+      </button>
+      ${markerMenu}
+    </div>
     <div class="tl-group" style="margin-left:8px">
       <button id="mode-picture" class="${state.timelineMode === "picture" ? "active" : ""}">${ICONS.film}${t("picture")}</button>
       <button id="mode-wave" class="${state.timelineMode === "waveform" ? "active" : ""}">${ICONS.wave}${t("waveform")}</button>
@@ -894,6 +1014,30 @@ function timelineBarHtml() {
   </div>`;
 }
 
+function scenePresetMenuHtml() {
+  if (state.hudMenu !== "presets") return "";
+  const zh = state.lang === "zh";
+  const presets = state.presets || [];
+  const rows = presets.length
+    ? presets.map((preset) => `
+      <div class="preset-row ${preset.id === state.activePresetId ? "active" : ""}">
+        <button type="button" class="preset-apply" data-preset-apply="${preset.id}">
+          <strong>${escapeHtml(preset.name)}</strong>
+          ${preset.id === state.presetDefaultId ? `<em>${zh ? "默认" : "Default"}</em>` : ""}
+        </button>
+        <button type="button" class="btn ghost" data-preset-default="${preset.id}" title="${zh ? "设为新录制默认" : "Default for new recordings"}">${preset.id === state.presetDefaultId ? "★" : "☆"}</button>
+        <button type="button" class="btn ghost" data-preset-delete="${preset.id}" title="${t("delete")}">×</button>
+      </div>`).join("")
+    : `<p class="note">${zh ? "还没有场景预设。保存当前画面+开场+光标+摄像头外观。" : "No scene presets yet. Save canvas, opening, cursor, and camera style."}</p>`;
+  return `<aside class="preset-menu island" id="preset-menu" role="dialog" aria-label="${zh ? "场景预设" : "Scene presets"}">
+    <div class="section-title">${zh ? "场景预设" : "Scene presets"}</div>
+    <div class="preset-list">${rows}</div>
+    <div class="preset-actions">
+      <button class="btn primary" id="preset-save">${zh ? "保存当前场景" : "Save current"}</button>
+    </div>
+  </aside>`;
+}
+
 function exportSheetHtml() {
   const sheet = state.exportSheet;
   if (!sheet) return "";
@@ -901,22 +1045,32 @@ function exportSheetHtml() {
   const estimate = sheet.estimate || {};
   const progress = Math.round((sheet.progress || 0) * 100);
   const busy = sheet.state === "running";
+  const exp = state.project.export || {};
+  const kind = exp.kind || "video";
+  const scope = exp.scope || "full";
+  const selectedCount = (state.selectedClipIds || []).length;
+  const sizeLabel = kind === "audio"
+    ? (zh ? "音频" : "Audio")
+    : `${estimate.width || "—"}×${estimate.height || "—"}`;
   return `<div class="export-scrim" id="export-scrim">
     <aside class="export-sheet island" role="dialog" aria-label="${t("export")}">
       <div class="section-title">${zh ? "导出成片" : "Export"}</div>
-      <p class="note">${zh ? "按当前画面、裁切与运镜生成 MP4。" : "Renders MP4 with current canvas, crop, and motion."}</p>
-      <label class="field">${t("resolution")}<select id="sheet-resolution" ${busy ? "disabled" : ""}>${options(["source", "1080p", "1440p", "4k"], state.project.export.resolution)}</select></label>
-      <label class="field">${t("fps")}<select id="sheet-fps" ${busy ? "disabled" : ""}>${options(["30", "60"], String(state.project.export.fps))}</select></label>
+      <p class="note">${zh ? "可导出整段或选中片段，支持视频与仅音频。" : "Full timeline or selection; video or audio-only."}</p>
+      <label class="field">${zh ? "输出" : "Output"}<select id="sheet-kind" ${busy ? "disabled" : ""}>${options(["video", "audio"], kind, { video: zh ? "视频 MP4" : "Video MP4", audio: zh ? "仅音频 M4A" : "Audio M4A" })}</select></label>
+      <label class="field">${zh ? "范围" : "Scope"}<select id="sheet-scope" ${busy ? "disabled" : ""}>${options(["full", "selection"], scope, { full: zh ? "整段时间线" : "Full timeline", selection: zh ? `选中片段${selectedCount ? ` (${selectedCount})` : ""}` : `Selection${selectedCount ? ` (${selectedCount})` : ""}` })}</select></label>
+      <label class="field">${t("resolution")}<select id="sheet-resolution" ${busy || kind === "audio" ? "disabled" : ""}>${options(["source", "1080p", "1440p", "4k"], exp.resolution)}</select></label>
+      <label class="field">${t("fps")}<select id="sheet-fps" ${busy || kind === "audio" ? "disabled" : ""}>${options(["30", "60"], String(exp.fps))}</select></label>
       <div class="export-meta">
-        <div><span>${zh ? "分辨率" : "Size"}</span><strong>${estimate.width || "—"}×${estimate.height || "—"}</strong></div>
+        <div><span>${zh ? "分辨率" : "Size"}</span><strong>${sizeLabel}</strong></div>
         <div><span>${zh ? "时长" : "Duration"}</span><strong>${formatTime(estimate.duration || Z.duration(state.project.clips))}</strong></div>
         <div><span>${zh ? "估大小" : "Est."}</span><strong>${formatBytes(estimate.bytes || 0)}</strong></div>
       </div>
+      ${scope === "selection" && selectedCount === 0 ? `<p class="note">${zh ? "先在时间线用 ⇧/⌘ 多选片段。" : "Multi-select clips with ⇧/⌘ first."}</p>` : ""}
       ${busy ? `<div class="export-progress"><i style="width:${progress}%"></i></div><p class="note">${zh ? `导出中… ${progress}%` : `Exporting… ${progress}%`}</p>` : ""}
       ${sheet.error ? `<p class="note" style="color:var(--red)">${escapeHtml(sheet.error)}</p>` : ""}
       <div class="export-actions">
         <button class="btn" id="export-cancel" ${busy ? "disabled" : ""}>${zh ? "取消" : "Cancel"}</button>
-        <button class="btn primary" id="export-start" ${busy ? "disabled" : ""}>${busy ? (zh ? "导出中" : "Working") : (zh ? "开始导出" : "Start")}</button>
+        <button class="btn primary" id="export-start" ${busy || (scope === "selection" && selectedCount === 0) ? "disabled" : ""}>${busy ? (zh ? "导出中" : "Working") : (zh ? "开始导出" : "Start")}</button>
       </div>
     </aside>
   </div>`;
@@ -938,6 +1092,10 @@ function editorHtml() {
       </div>
       <div class="top-trailing">
         <button class="btn icon" id="lang" title="${t("lang")}">${t("lang") === "English" ? "EN" : "中"}</button>
+        <div class="preset-anchor">
+          <button class="btn" id="preset-btn" title="${state.lang === "zh" ? "场景预设" : "Scene presets"}" ${state.cropping ? "disabled" : ""} aria-expanded="${state.hudMenu === "presets"}">${state.lang === "zh" ? "场景" : "Scene"}${ICONS.chevronDown}</button>
+          ${scenePresetMenuHtml()}
+        </div>
         <button class="btn icon" id="settings-btn" title="${state.lang === "zh" ? "快捷键" : "Shortcuts"}" aria-expanded="${state.hudMenu === "shortcuts"}">${ICONS.gear}</button>
         <button class="btn icon danger" id="delete-project" title="${t("delete")}" ${state.cropping ? "disabled" : ""}>${ICONS.trash}</button>
         <span class="toolbar-divider"></span>
@@ -1076,16 +1234,71 @@ function mockupPanel(canvas) {
     <label class="field">${state.lang === "zh" ? "地址" : "Address"}<input id="frame-address" type="text" value="${escapeHtml(canvas.frame_address || "dogsc.app")}"></label>`;
 }
 
+function openingElementOrder(opening) {
+  const order = Array.isArray(opening.element_order) && opening.element_order.length
+    ? opening.element_order
+    : ["screen", "camera", "stickers"];
+  const known = ["screen", "camera", "stickers"];
+  return [...order.filter((id) => known.includes(id)), ...known.filter((id) => !order.includes(id))];
+}
+
 function openingInspector() {
   const opening = state.project.opening || {};
+  const zh = state.lang === "zh";
+  const labels = {
+    screen: zh ? "屏幕" : "Screen",
+    camera: t("camera"),
+    stickers: t("sticker"),
+  };
+  const include = {
+    screen: opening.include_screen !== false,
+    camera: opening.include_camera !== false,
+    stickers: opening.include_stickers !== false,
+  };
+  const order = openingElementOrder(opening);
   return `
     <h2>${t("opening")}</h2>
-    <label class="row"><input id="opening-enabled" type="checkbox" ${opening.enabled ? "checked" : ""}> 启用开场</label>
+    <label class="row"><input id="opening-enabled" type="checkbox" ${opening.enabled ? "checked" : ""}> ${zh ? "启用开场" : "Enable opening"}</label>
     <div class="section">
       ${Object.keys(OPENING_LABELS.zh).map((id) => `<button class="choice-card ${opening.preset === id ? "active" : ""}" data-opening="${id}"><strong>${OPENING_LABELS[state.lang][id]}</strong></button>`).join("")}
     </div>
-    <label class="field">时长<input id="opening-duration" type="range" min="0.4" max="4" step="0.1" value="${opening.duration || 1.4}"></label>
-    <label class="field">节奏<select id="opening-curve">${options(["smooth","swift","gentle"], opening.curve || "smooth", { smooth: "平滑", swift: "利落", gentle: "柔和" })}</select></label>`;
+    <label class="field">${zh ? "时长" : "Duration"}<input id="opening-duration" type="range" min="0.4" max="4" step="0.1" value="${opening.duration || 1.4}"></label>
+    <label class="field">${zh ? "节奏" : "Curve"}<select id="opening-curve">${options(["smooth","swift","gentle"], opening.curve || "smooth", { smooth: "平滑", swift: "利落", gentle: "柔和" })}</select></label>
+    <label class="field">${fieldValue(zh ? "错峰" : "Stagger", `${Number(opening.stagger ?? 0.12).toFixed(2)}s`)}<input id="opening-stagger" type="range" min="0" max="1" step="0.02" value="${opening.stagger ?? 0.12}"></label>
+    <div class="section" style="margin-top:12px">
+      <div class="section-title">${zh ? "元素顺序" : "Element order"}</div>
+      <p class="note">${zh ? "勾选参与开场，并用箭头调整出现先后。" : "Toggle participants and reorder with arrows."}</p>
+      <div class="opening-order">
+        ${order.map((id, index) => `
+          <div class="opening-order-row${!include[id] ? " is-off" : ""}" data-opening-el="${id}">
+            <label class="row"><input type="checkbox" data-opening-include="${id}" ${include[id] ? "checked" : ""}> <strong>${labels[id]}</strong></label>
+            <div class="opening-order-actions">
+              <button type="button" class="btn ghost" data-opening-move="${id}" data-dir="-1" ${index === 0 ? "disabled" : ""} aria-label="up">↑</button>
+              <button type="button" class="btn ghost" data-opening-move="${id}" data-dir="1" ${index === order.length - 1 ? "disabled" : ""} aria-label="down">↓</button>
+            </div>
+          </div>`).join("")}
+      </div>
+    </div>`;
+}
+
+function defaultFocusEffect() {
+  return { size: 0.45, blur: 0.35, softness: 0.5, dimming: 0.18 };
+}
+
+function focusEffectInspectorHtml(selected) {
+  const effect = selected.focus_effect;
+  const on = !!effect;
+  const values = effect || defaultFocusEffect();
+  return `
+    <div class="section" style="margin-top:12px">
+      <label class="row"><input id="focus-effect-on" type="checkbox" ${on ? "checked" : ""}> ${t("focusEffect")}</label>
+      ${on ? `
+        <label class="field">${fieldValue(t("focusSize"), `${Math.round(values.size * 100)}%`)}<input id="focus-size" type="range" min="0.1" max="1" step="0.01" value="${values.size}"></label>
+        <label class="field">${fieldValue(t("focusBlur"), `${Math.round(values.blur * 100)}%`)}<input id="focus-blur" type="range" min="0" max="1" step="0.01" value="${values.blur}"></label>
+        <label class="field">${fieldValue(t("focusSoftness"), `${Math.round(values.softness * 100)}%`)}<input id="focus-soft" type="range" min="0" max="1" step="0.01" value="${values.softness}"></label>
+        <label class="field">${fieldValue(t("focusDim"), `${Math.round(values.dimming * 100)}%`)}<input id="focus-dim" type="range" min="0" max="1" step="0.01" value="${values.dimming}"></label>
+      ` : ""}
+    </div>`;
 }
 
 function motionInspector() {
@@ -1117,6 +1330,7 @@ function motionInspector() {
         <span>X ${Math.round(Number(selected.focus_x ?? 0.5) * 100)}%</span>
         <span>Y ${Math.round(Number(selected.focus_y ?? 0.5) * 100)}%</span>
       </div>
+      ${focusEffectInspectorHtml(selected)}
       ${envelopeHtml(selected.easing || "cubic")}
       <div class="dial-row">
         ${dialHtml(zh ? "放大" : "Zoom", `${Number(selected.scale).toFixed(2)}x`, (Number(selected.scale) - 1) / 3)}
@@ -1139,11 +1353,49 @@ function motionInspector() {
       <button class="btn ghost" id="delete-motion">${t("delete")}</button>` : `<div class="empty-action scope-card">
         <p class="note">${zh ? "在播放头加入 3D 运镜。" : "Add a 3D motion at the playhead."}</p>
       </div>`)}
-    ${state.selectedMosaic ? `
+    ${state.selectedMosaic ? mosaicInspectorHtml(state.selectedMosaic, zh) : ""}
+    ${state.selectedSticker ? stickerInspectorHtml(state.selectedSticker, zh) : ""}`;
+}
+
+function mosaicInspectorHtml(mosaic, zh) {
+  const style = mosaic.style === "spotlight" ? "spotlight" : "blur";
+  return `
       <div class="section"><div class="section-title">${t("mosaic")}</div>
-        <label class="field">${fieldValue(zh ? "强度" : "Strength", `${Math.round((state.selectedMosaic.intensity || 0.55) * 100)}%`)}<input id="mosaic-intensity" type="range" min="0.1" max="1" step="0.05" value="${state.selectedMosaic.intensity || 0.55}"></label>
+        <div class="segmented" style="margin-bottom:10px">
+          <button type="button" data-mosaic-style="blur" class="${style === "blur" ? "active" : ""}">${zh ? "柔化" : "Blur"}</button>
+          <button type="button" data-mosaic-style="spotlight" class="${style === "spotlight" ? "active" : ""}">${zh ? "突出" : "Spotlight"}</button>
+        </div>
+        ${style === "blur"
+          ? `<label class="field">${fieldValue(zh ? "强度" : "Strength", `${Math.round((mosaic.intensity || 0.55) * 100)}%`)}<input id="mosaic-intensity" type="range" min="0.1" max="1" step="0.05" value="${mosaic.intensity || 0.55}"></label>`
+          : `<label class="field">${fieldValue(zh ? "暗度" : "Dimming", `${Math.round((mosaic.dimming || 0.22) * 100)}%`)}<input id="mosaic-dimming" type="range" min="0" max="0.75" step="0.01" value="${mosaic.dimming || 0.22}"></label>`}
+        <label class="field">${fieldValue(zh ? "圆角" : "Radius", `${Math.round((mosaic.corner_radius || 0.08) * 100)}%`)}<input id="mosaic-radius" type="range" min="0" max="0.5" step="0.01" value="${mosaic.corner_radius || 0.08}"></label>
+        <label class="field">${fieldValue(zh ? "宽度" : "Width", `${Math.round((mosaic.width || 0.3) * 100)}%`)}<input id="mosaic-width" type="range" min="0.05" max="1" step="0.01" value="${mosaic.width || 0.3}"></label>
+        <label class="field">${fieldValue(zh ? "高度" : "Height", `${Math.round((mosaic.height || 0.25) * 100)}%`)}<input id="mosaic-height" type="range" min="0.05" max="1" step="0.01" value="${mosaic.height || 0.25}"></label>
         <button class="btn" id="delete-mosaic">${t("delete")}</button>
-      </div>` : ""}`;
+      </div>`;
+}
+
+function stickerInspectorHtml(sticker, zh) {
+  return `
+      <div class="section"><div class="section-title">${t("sticker")}</div>
+        <label class="field">${fieldValue(zh ? "宽度" : "Width", `${Math.round((sticker.width || 0.22) * 100)}%`)}<input id="sticker-width" type="range" min="0.05" max="0.9" step="0.01" value="${sticker.width || 0.22}"></label>
+        <label class="field">${fieldValue(zh ? "旋转" : "Rotate", `${Math.round(sticker.rotation || 0)}°`)}<input id="sticker-rotation" type="range" min="-180" max="180" step="1" value="${sticker.rotation || 0}"></label>
+        <label class="field">${fieldValue(zh ? "透明度" : "Opacity", `${Math.round((sticker.opacity == null ? 1 : sticker.opacity) * 100)}%`)}<input id="sticker-opacity" type="range" min="0.05" max="1" step="0.01" value="${sticker.opacity == null ? 1 : sticker.opacity}"></label>
+        <label class="field">${fieldValue(zh ? "圆角" : "Radius", `${Math.round(sticker.corner_radius || 18)}`)}<input id="sticker-radius" type="range" min="0" max="80" step="1" value="${sticker.corner_radius || 18}"></label>
+        <label class="field">${fieldValue(zh ? "描边" : "Border", `${Math.round(sticker.border || 0)}`)}<input id="sticker-border" type="range" min="0" max="16" step="1" value="${sticker.border || 0}"></label>
+        <label class="field">${zh ? "描边颜色" : "Border color"}<input id="sticker-border-color" type="color" value="${sticker.border_color || "#ffffff"}"></label>
+        <label class="field">${fieldValue(zh ? "阴影" : "Shadow", `${Math.round((sticker.shadow == null ? 0.28 : sticker.shadow) * 100)}%`)}<input id="sticker-shadow" type="range" min="0" max="1" step="0.05" value="${sticker.shadow == null ? 0.28 : sticker.shadow}"></label>
+        <label class="field">${fieldValue(zh ? "背景虚化" : "Backdrop", `${Math.round(sticker.backdrop_blur || 0)}`)}<input id="sticker-backdrop" type="range" min="0" max="40" step="1" value="${sticker.backdrop_blur || 0}"></label>
+        <label class="field">${zh ? "入场" : "Enter"}<select id="sticker-animation">${options(["none","pop","fade","slide"], sticker.animation || "pop", { none: zh ? "无" : "None", pop: "Pop", fade: zh ? "淡入" : "Fade", slide: zh ? "滑入" : "Slide" })}</select></label>
+        <label class="field">${fieldValue(zh ? "入场时长" : "Enter dur", `${Number(sticker.enter ?? 0.7).toFixed(2)}s`)}<input id="sticker-enter" type="range" min="0" max="2" step="0.05" value="${sticker.enter ?? 0.7}"></label>
+        <label class="field">${zh ? "退场" : "Exit"}<select id="sticker-exit-animation">${options(["none","pop","fade","slide"], sticker.exit_animation || "none", { none: zh ? "无" : "None", pop: "Pop", fade: zh ? "淡出" : "Fade", slide: zh ? "滑出" : "Slide" })}</select></label>
+        <label class="field">${fieldValue(zh ? "退场时长" : "Exit dur", `${Number(sticker.exit ?? 0.22).toFixed(2)}s`)}<input id="sticker-exit" type="range" min="0" max="2" step="0.05" value="${sticker.exit ?? 0.22}"></label>
+        <div class="actions" style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0">
+          <button class="btn" id="sticker-layer-back">${zh ? "下移一层" : "Send back"}</button>
+          <button class="btn" id="sticker-layer-front">${zh ? "上移一层" : "Bring forward"}</button>
+        </div>
+        <button class="btn" id="delete-sticker">${t("delete")}</button>
+      </div>`;
 }
 
 function cursorInspector() {
@@ -1161,38 +1413,55 @@ function cursorInspector() {
 
 function cameraInspector() {
   const camera = state.project.camera || {};
+  const zh = state.lang === "zh";
   const mediaNote = camera.media
-    ? (state.lang === "zh" ? `已收录摄像头轨：${camera.media}` : `Recorded camera track: ${camera.media}`)
-    : (state.lang === "zh" ? "预览优先用本机摄像头；录制时可勾选画中画副轨。" : "Live preview uses the local camera; enable PiP during capture to record a sidecar.");
+    ? (zh ? `已收录摄像头轨：${camera.media}` : `Recorded camera track: ${camera.media}`)
+    : (zh ? "预览优先用本机摄像头；录制时可勾选画中画副轨。" : "Live preview uses the local camera; enable PiP during capture to record a sidecar.");
   return `
     <h2>${t("camera")}</h2>
     <p class="note">${escapeHtml(mediaNote)}</p>
-    <label class="row"><input id="camera-enabled" type="checkbox" ${camera.enabled ? "checked" : ""}> 显示摄像头</label>
-    <label class="field">形状<select id="camera-shape">${options(["circle","square","horizontal","vertical","original"], camera.shape || "circle", { circle: "圆形", square: "方形", horizontal: "横向", vertical: "纵向", original: "原始比例" })}</select></label>
-    <label class="field">大小<input id="camera-size" type="range" min="0.1" max="0.45" step="0.01" value="${camera.size || 0.22}"></label>
-    <label class="field">水平<input id="camera-x" type="range" min="0" max="1" step="0.01" value="${camera.x ?? 0.82}"></label>
-    <label class="field">垂直<input id="camera-y" type="range" min="0" max="1" step="0.01" value="${camera.y ?? 0.78}"></label>
-    <label class="row"><input id="camera-mirror" type="checkbox" ${camera.mirror ? "checked" : ""}> 镜像</label>
+    <label class="row"><input id="camera-enabled" type="checkbox" ${camera.enabled ? "checked" : ""}> ${zh ? "显示摄像头" : "Show camera"}</label>
+    <label class="field">${zh ? "形状" : "Shape"}<select id="camera-shape">${options(["circle","square","horizontal","vertical","original"], camera.shape || "circle", { circle: "圆形", square: "方形", horizontal: "横向", vertical: "纵向", original: "原始比例" })}</select></label>
+    <label class="field">${fieldValue(zh ? "大小" : "Size", `${Math.round((camera.size || 0.22) * 100)}%`)}<input id="camera-size" type="range" min="0.1" max="0.45" step="0.01" value="${camera.size || 0.22}"></label>
+    <label class="field">${fieldValue(zh ? "水平" : "X", `${Math.round((camera.x ?? 0.82) * 100)}%`)}<input id="camera-x" type="range" min="0" max="1" step="0.01" value="${camera.x ?? 0.82}"></label>
+    <label class="field">${fieldValue(zh ? "垂直" : "Y", `${Math.round((camera.y ?? 0.78) * 100)}%`)}<input id="camera-y" type="range" min="0" max="1" step="0.01" value="${camera.y ?? 0.78}"></label>
+    <label class="field">${fieldValue(zh ? "圆角" : "Round", `${Math.round((camera.roundness ?? 1) * 100)}%`)}<input id="camera-roundness" type="range" min="0" max="1" step="0.01" value="${camera.roundness ?? 1}"></label>
+    <label class="field">${fieldValue(zh ? "描边" : "Border", `${Math.round(camera.border ?? 3)}`)}<input id="camera-border" type="range" min="0" max="16" step="1" value="${camera.border ?? 3}"></label>
+    <label class="field">${zh ? "描边颜色" : "Border color"}<input id="camera-border-color" type="color" value="${camera.border_color || "#ffffff"}"></label>
+    <label class="field">${fieldValue(zh ? "透明度" : "Opacity", `${Math.round((camera.opacity == null ? 1 : camera.opacity) * 100)}%`)}<input id="camera-opacity" type="range" min="0.1" max="1" step="0.01" value="${camera.opacity == null ? 1 : camera.opacity}"></label>
+    <label class="field">${fieldValue(zh ? "阴影" : "Shadow", `${Math.round((camera.shadow ?? 0.35) * 100)}%`)}<input id="camera-shadow" type="range" min="0" max="1" step="0.05" value="${camera.shadow ?? 0.35}"></label>
+    <label class="row"><input id="camera-mirror" type="checkbox" ${camera.mirror ? "checked" : ""}> ${zh ? "镜像" : "Mirror"}</label>
     <p class="note">${t("note")}</p>`;
 }
 
 function audioInspector() {
   const audio = state.project.audio || {};
   const clip = Z.locateTimeline(state.project.clips, state.time)?.clip;
+  const clipAudio = clip?.audio || {};
+  const zh = state.lang === "zh";
   return `
     <h2>${t("audio")}</h2>
-    <div class="section-title">调音台</div>
-    <label class="field">系统声音<input id="system-volume" type="range" min="0" max="2" step="0.05" value="${audio.system_volume ?? 1}"></label>
-    <label class="row"><input id="system-muted" type="checkbox" ${audio.system_muted ? "checked" : ""}> 静音系统声音</label>
-    <label class="field">麦克风<input id="mic-volume" type="range" min="0" max="2" step="0.05" value="${audio.mic_volume ?? 1}"></label>
-    <label class="row"><input id="mic-muted" type="checkbox" ${audio.mic_muted ? "checked" : ""}> 静音麦克风</label>
+    <div class="section-title">${zh ? "总线调音台" : "Master mixer"}</div>
+    <label class="field">${zh ? "系统声音" : "System"}<input id="system-volume" type="range" min="0" max="2" step="0.05" value="${audio.system_volume ?? 1}"></label>
+    <label class="row"><input id="system-muted" type="checkbox" ${audio.system_muted ? "checked" : ""}> ${zh ? "静音系统声音" : "Mute system"}</label>
+    <label class="field">${zh ? "麦克风" : "Microphone"}<input id="mic-volume" type="range" min="0" max="2" step="0.05" value="${audio.mic_volume ?? 1}"></label>
+    <label class="row"><input id="mic-muted" type="checkbox" ${audio.mic_muted ? "checked" : ""}> ${zh ? "静音麦克风" : "Mute mic"}</label>
+    ${clip ? `
+      <div class="section" style="margin-top:16px">
+        <div class="section-title">${zh ? "当前片段覆写" : "Clip override"}</div>
+        <p class="note">${zh ? "只影响播放头所在片段；留默认则跟随总线。" : "Applies only to the clip under the playhead."}</p>
+        <label class="field">${zh ? "片段系统音量" : "Clip system"}<input id="clip-system-volume" type="range" min="0" max="2" step="0.05" value="${clipAudio.system_volume ?? audio.system_volume ?? 1}"></label>
+        <label class="row"><input id="clip-system-muted" type="checkbox" ${clipAudio.system_muted ? "checked" : ""}> ${zh ? "静音此片段系统声" : "Mute clip system"}</label>
+        <label class="field">${zh ? "片段麦克风" : "Clip mic"}<input id="clip-mic-volume" type="range" min="0" max="2" step="0.05" value="${clipAudio.mic_volume ?? audio.mic_volume ?? 1}"></label>
+        <label class="row"><input id="clip-mic-muted" type="checkbox" ${clipAudio.mic_muted ? "checked" : ""}> ${zh ? "静音此片段麦克风" : "Mute clip mic"}</label>
+      </div>` : ""}
     <div class="section" style="margin-top:18px">
       <div class="section-title">${t("export")}</div>
       <label class="field">${t("resolution")}<select id="resolution">${options(["source", "1080p", "1440p", "4k"], state.project.export.resolution)}</select></label>
       <label class="field">${t("fps")}<select id="export-fps">${options(["30", "60"], String(state.project.export.fps))}</select></label>
     </div>
     ${clip ? `
-      <div class="section"><div class="section-title">当前片段</div>
+      <div class="section"><div class="section-title">${zh ? "当前片段" : "Clip"}</div>
         <label class="field">${t("speed")}<input id="speed" type="range" min="0.5" max="4" step="0.25" value="${clip.speed || 1}"></label>
         <div class="actions" style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn" id="move-earlier">${t("earlier")}</button>
@@ -1328,10 +1597,21 @@ function bindHome() {
   });
   document.querySelector("#start-record")?.addEventListener("click", (event) => {
     DogSCMotion.press(event.currentTarget);
-    startRecording();
+    beginRecording();
   });
   document.querySelector("#stop-record")?.addEventListener("click", stopRecording);
+  document.querySelector("#discard-live")?.addEventListener("click", discardLiveRecording);
+  document.querySelector("#discard-record")?.addEventListener("click", discardRecordDecision);
+  document.querySelector("#save-record")?.addEventListener("click", saveRecordDecision);
+  document.querySelector("#toggle-pause")?.addEventListener("click", toggleRecordPause);
   document.querySelector("#add-marker")?.addEventListener("click", () => api("/api/record/marker", { method: "POST", body: {} }).catch((error) => toast(error.message)));
+  const countdownSel = document.querySelector("#countdown-sel");
+  if (countdownSel) {
+    countdownSel.onchange = () => {
+      state.record.countdown = Number(countdownSel.value);
+      localStorage.setItem("dogsc-countdown", String(state.record.countdown));
+    };
+  }
   const pop = document.querySelector("#rec-pop");
   if (pop) {
     pop.style.transition = DogSCMotion.cssTransition("morph");
@@ -1361,12 +1641,95 @@ function dismissRecorderPopover(event) {
 
 function dismissHudMenu(event) {
   if (!state.hudMenu) return;
-  if (event.target.closest("#shortcuts-panel, #settings-btn, .hud-menu, #aspect-btn, #add-btn, #preview-btn")) {
+  if (event.target.closest("#shortcuts-panel, #settings-btn, #preset-btn, #preset-menu, .hud-menu, #aspect-btn, #add-btn, #preview-btn")) {
     document.addEventListener("pointerdown", dismissHudMenu, { once: true });
     return;
   }
   state.hudMenu = null;
   render();
+}
+
+async function loadPresets() {
+  try {
+    const store = await api("/api/presets");
+    state.presets = store.presets || [];
+    state.presetDefaultId = store.default_id || null;
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function saveScenePreset() {
+  if (!state.project) return;
+  const zh = state.lang === "zh";
+  const suggested = state.activePresetId
+    ? (state.presets.find((item) => item.id === state.activePresetId)?.name || "")
+    : `${zh ? "场景" : "Scene"} ${(state.presets?.length || 0) + 1}`;
+  const name = prompt(zh ? "场景预设名称" : "Scene preset name", suggested);
+  if (name == null) return;
+  try {
+    const body = {
+      project_id: state.project.id,
+      name,
+    };
+    if (state.activePresetId && state.presets.some((item) => item.id === state.activePresetId && item.name === name.trim())) {
+      body.id = state.activePresetId;
+    }
+    const store = await api("/api/presets", { method: "POST", body });
+    state.presets = store.presets || [];
+    state.presetDefaultId = store.default_id || null;
+    const saved = state.presets.find((item) => item.name === name.trim()) || state.presets.at(-1);
+    state.activePresetId = saved?.id || null;
+    toast(zh ? "场景预设已保存" : "Scene preset saved");
+    render();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function applyScenePreset(presetId) {
+  if (!state.project || !presetId) return;
+  try {
+    state.project = await api(`/api/projects/${state.project.id}/apply-preset`, {
+      method: "POST",
+      body: { id: presetId },
+    });
+    state.activePresetId = presetId;
+    state.hudMenu = null;
+    toast(state.lang === "zh" ? "已应用场景预设" : "Scene preset applied");
+    render();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function setScenePresetDefault(presetId) {
+  try {
+    const next = state.presetDefaultId === presetId ? null : presetId;
+    const store = await api("/api/presets", {
+      method: "POST",
+      body: { action: "default", id: next },
+    });
+    state.presets = store.presets || [];
+    state.presetDefaultId = store.default_id || null;
+    render();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function deleteScenePreset(presetId) {
+  if (!presetId) return;
+  if (!confirm(state.lang === "zh" ? "删除这个场景预设？" : "Delete this scene preset?")) return;
+  try {
+    const store = await api(`/api/presets/${presetId}`, { method: "DELETE" });
+    state.presets = store.presets || [];
+    state.presetDefaultId = store.default_id || null;
+    if (state.activePresetId === presetId) state.activePresetId = null;
+    render();
+  } catch (error) {
+    toast(error.message);
+  }
 }
 
 function bind() {
@@ -1401,6 +1764,26 @@ function bind() {
     state.hudMenu = state.hudMenu === "shortcuts" ? null : "shortcuts";
     render();
   });
+  document.querySelector("#preset-btn")?.addEventListener("click", async () => {
+    if (state.hudMenu === "presets") {
+      state.hudMenu = null;
+      render();
+      return;
+    }
+    await loadPresets();
+    state.hudMenu = "presets";
+    render();
+  });
+  document.querySelector("#preset-save")?.addEventListener("click", saveScenePreset);
+  document.querySelectorAll("[data-preset-apply]").forEach((node) => {
+    node.onclick = () => applyScenePreset(node.dataset.presetApply);
+  });
+  document.querySelectorAll("[data-preset-default]").forEach((node) => {
+    node.onclick = () => setScenePresetDefault(node.dataset.presetDefault);
+  });
+  document.querySelectorAll("[data-preset-delete]").forEach((node) => {
+    node.onclick = () => deleteScenePreset(node.dataset.presetDelete);
+  });
   if (state.hudMenu) document.addEventListener("pointerdown", dismissHudMenu, { once: true });
   document.querySelector("#undo").onclick = () => mutate(`/api/projects/${state.project.id}/undo`, {});
   document.querySelector("#redo").onclick = () => mutate(`/api/projects/${state.project.id}/redo`, {});
@@ -1416,6 +1799,16 @@ function bind() {
     render();
   });
   document.querySelector("#export-start")?.addEventListener("click", startExportFromSheet);
+  document.querySelector("#sheet-kind")?.addEventListener("change", async (event) => {
+    await meta({ export: { ...state.project.export, kind: event.target.value } });
+    render();
+    refreshExportEstimate();
+  });
+  document.querySelector("#sheet-scope")?.addEventListener("change", async (event) => {
+    await meta({ export: { ...state.project.export, scope: event.target.value } });
+    render();
+    refreshExportEstimate();
+  });
   document.querySelector("#sheet-resolution")?.addEventListener("change", async (event) => {
     await meta({ export: { ...state.project.export, resolution: event.target.value } });
     refreshExportEstimate();
@@ -1478,6 +1871,65 @@ function bind() {
   document.querySelector("#add-tilt")?.addEventListener("click", () => mutate(`/api/projects/${state.project.id}/screen-motion`, { time: state.time, rotation_x: 12, rotation_y: -10 }));
   document.querySelector("#add-mosaic")?.addEventListener("click", () => { state.hudMenu = null; mutate(`/api/projects/${state.project.id}/mosaic`, { time: state.time }); });
   document.querySelector("#add-edit-marker")?.addEventListener("click", () => mutate(`/api/projects/${state.project.id}/marker`, { time: state.time }));
+  document.querySelector("#marker-list-btn")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    state.markerList = !state.markerList;
+    state.trackMenu = false;
+    render();
+  });
+  document.querySelector("#marker-list-close")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    state.markerList = false;
+    render();
+  });
+  document.querySelectorAll("[data-marker-seek]").forEach((node) => {
+    node.addEventListener("click", (event) => {
+      if (event.target.closest("[data-marker-del]")) return;
+      const marker = (state.project.markers || []).find((item) => item.id === node.dataset.markerSeek);
+      if (!marker) return;
+      state.selectedMarker = marker.id;
+      state.playing = false;
+      state.time = markerAbsoluteTime(marker);
+      updatePlayButton();
+      paintCanvas();
+      drawTimeline();
+    });
+    node.addEventListener("dblclick", async (event) => {
+      event.preventDefault();
+      const marker = (state.project.markers || []).find((item) => item.id === node.dataset.markerSeek);
+      if (!marker) return;
+      const label = prompt(state.lang === "zh" ? "标记名称" : "Marker label", marker.label || "");
+      if (label == null) return;
+      try {
+        state.project = await api(`/api/projects/${state.project.id}/marker-update`, {
+          method: "POST",
+          body: { id: marker.id, label },
+        });
+        render();
+      } catch (error) { toast(error.message); }
+    });
+  });
+  document.querySelectorAll("[data-marker-del]").forEach((node) => {
+    node.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      try {
+        state.project = await api(`/api/projects/${state.project.id}/marker-delete`, {
+          method: "POST",
+          body: { id: node.dataset.markerDel },
+        });
+        if (state.selectedMarker === node.dataset.markerDel) state.selectedMarker = null;
+        render();
+      } catch (error) { toast(error.message); }
+    });
+  });
+  if (state.markerList) {
+    document.addEventListener("pointerdown", (event) => {
+      if (event.target.closest("#marker-list, #marker-list-btn")) return;
+      if (!state.markerList) return;
+      state.markerList = false;
+      render();
+    }, { once: true });
+  }
   document.querySelector("#sticker-file")?.addEventListener("change", async (event) => {
     const data = new FormData();
     data.append("file", event.target.files[0]);
@@ -1633,14 +2085,36 @@ function bindInspectorFields() {
     ["#opening-enabled", (v, el) => meta({ opening: { ...state.project.opening, enabled: el.checked } }), "change"],
     ["#opening-duration", (v) => meta({ opening: { ...state.project.opening, duration: Number(v) } })],
     ["#opening-curve", (v) => meta({ opening: { ...state.project.opening, curve: v } })],
+    ["#opening-stagger", (v) => meta({ opening: { ...state.project.opening, stagger: Number(v) } })],
     ["#zoom-scale", (v) => updateZoom({ scale: Number(v) })],
     ["#zoom-enter", (v) => updateZoom({ enter: Number(v) })],
     ["#zoom-exit", (v) => updateZoom({ exit: Number(v) })],
     ["#easing", (v) => updateZoom({ easing: v })],
+    ["#focus-effect-on", (v, el) => updateZoom({ focus_effect: el.checked ? defaultFocusEffect() : null }), "change"],
+    ["#focus-size", (v) => patchFocusEffect({ size: Number(v) })],
+    ["#focus-blur", (v) => patchFocusEffect({ blur: Number(v) })],
+    ["#focus-soft", (v) => patchFocusEffect({ softness: Number(v) })],
+    ["#focus-dim", (v) => patchFocusEffect({ dimming: Number(v) })],
     ["#rotation-z", (v) => updateMotion({ rotation_z: Number(v) })],
     ["#perspective", (v) => updateMotion({ perspective: Number(v) })],
     ["#motion-scale", (v) => updateMotion({ scale: Number(v) })],
     ["#mosaic-intensity", (v) => updateMosaic({ intensity: Number(v) })],
+    ["#mosaic-dimming", (v) => updateMosaic({ dimming: Number(v) })],
+    ["#mosaic-radius", (v) => updateMosaic({ corner_radius: Number(v) })],
+    ["#mosaic-width", (v) => updateMosaic({ width: Number(v) })],
+    ["#mosaic-height", (v) => updateMosaic({ height: Number(v) })],
+    ["#sticker-width", (v) => updateSticker({ width: Number(v) })],
+    ["#sticker-rotation", (v) => updateSticker({ rotation: Number(v) })],
+    ["#sticker-opacity", (v) => updateSticker({ opacity: Number(v) })],
+    ["#sticker-radius", (v) => updateSticker({ corner_radius: Number(v) })],
+    ["#sticker-border", (v) => updateSticker({ border: Number(v) })],
+    ["#sticker-border-color", (v) => updateSticker({ border_color: v })],
+    ["#sticker-shadow", (v) => updateSticker({ shadow: Number(v) })],
+    ["#sticker-backdrop", (v) => updateSticker({ backdrop_blur: Number(v) })],
+    ["#sticker-animation", (v) => updateSticker({ animation: v })],
+    ["#sticker-exit-animation", (v) => updateSticker({ exit_animation: v })],
+    ["#sticker-enter", (v) => updateSticker({ enter: Number(v) })],
+    ["#sticker-exit", (v) => updateSticker({ exit: Number(v) })],
     ["#cursor-size", (v) => meta({ cursor: { ...state.project.cursor, size: Number(v) } })],
     ["#click-effect", (v) => meta({ cursor: { ...state.project.cursor, click_effect: v } })],
     ["#cursor-motion", (v) => meta({ cursor: { ...state.project.cursor, motion: v } })],
@@ -1650,11 +2124,20 @@ function bindInspectorFields() {
     ["#camera-size", (v) => meta({ camera: { ...state.project.camera, size: Number(v) } })],
     ["#camera-x", (v) => meta({ camera: { ...state.project.camera, x: Number(v) } })],
     ["#camera-y", (v) => meta({ camera: { ...state.project.camera, y: Number(v) } })],
+    ["#camera-roundness", (v) => meta({ camera: { ...state.project.camera, roundness: Number(v) } })],
+    ["#camera-border", (v) => meta({ camera: { ...state.project.camera, border: Number(v) } })],
+    ["#camera-border-color", (v) => meta({ camera: { ...state.project.camera, border_color: v } })],
+    ["#camera-opacity", (v) => meta({ camera: { ...state.project.camera, opacity: Number(v) } })],
+    ["#camera-shadow", (v) => meta({ camera: { ...state.project.camera, shadow: Number(v) } })],
     ["#camera-mirror", (v, el) => meta({ camera: { ...state.project.camera, mirror: el.checked } }), "change"],
     ["#system-volume", (v) => meta({ audio: { ...state.project.audio, system_volume: Number(v) } })],
     ["#mic-volume", (v) => meta({ audio: { ...state.project.audio, mic_volume: Number(v) } })],
     ["#system-muted", (v, el) => meta({ audio: { ...state.project.audio, system_muted: el.checked } }), "change"],
     ["#mic-muted", (v, el) => meta({ audio: { ...state.project.audio, mic_muted: el.checked } }), "change"],
+    ["#clip-system-volume", (v) => updateClipAudio({ system_volume: Number(v) })],
+    ["#clip-mic-volume", (v) => updateClipAudio({ mic_volume: Number(v) })],
+    ["#clip-system-muted", (v, el) => updateClipAudio({ system_muted: el.checked }), "change"],
+    ["#clip-mic-muted", (v, el) => updateClipAudio({ mic_muted: el.checked }), "change"],
     ["#speed", (v) => mutate(`/api/projects/${state.project.id}/speed`, { id: Z.locateTimeline(state.project.clips, state.time).clip.id, speed: Number(v) })],
   ];
   map.forEach(([selector, handler, eventName]) => {
@@ -1673,6 +2156,35 @@ function bindInspectorFields() {
   document.querySelector("#delete-mosaic")?.addEventListener("click", async () => {
     state.project = await api(`/api/projects/${state.project.id}/mosaics/${state.selectedMosaic.id}`, { method: "DELETE" });
     state.selectedMosaic = null; render();
+  });
+  document.querySelector("#delete-sticker")?.addEventListener("click", async () => {
+    if (!state.selectedSticker) return;
+    state.project = await api(`/api/projects/${state.project.id}/stickers/${state.selectedSticker.id}`, { method: "DELETE" });
+    state.selectedSticker = null; render();
+  });
+  document.querySelector("#sticker-layer-back")?.addEventListener("click", () => nudgeStickerLayer(-1));
+  document.querySelector("#sticker-layer-front")?.addEventListener("click", () => nudgeStickerLayer(1));
+  document.querySelectorAll("[data-opening-include]").forEach((node) => {
+    node.onchange = () => {
+      const key = `include_${node.dataset.openingInclude}`;
+      meta({ opening: { ...state.project.opening, [key]: node.checked } });
+    };
+  });
+  document.querySelectorAll("[data-opening-move]").forEach((node) => {
+    node.onclick = () => {
+      const id = node.dataset.openingMove;
+      const dir = Number(node.dataset.dir || 0);
+      const order = openingElementOrder(state.project.opening || {});
+      const index = order.indexOf(id);
+      const next = index + dir;
+      if (index < 0 || next < 0 || next >= order.length) return;
+      const swapped = order.slice();
+      [swapped[index], swapped[next]] = [swapped[next], swapped[index]];
+      meta({ opening: { ...state.project.opening, element_order: swapped } });
+    };
+  });
+  document.querySelectorAll("[data-mosaic-style]").forEach((node) => {
+    node.onclick = () => updateMosaic({ style: node.dataset.mosaicStyle });
   });
   document.querySelector("#delete-clip")?.addEventListener("click", () => {
     const clip = Z.locateTimeline(state.project.clips, state.time)?.clip;
@@ -1716,6 +2228,93 @@ async function updateZoom(body) {
   if (!state.selectedZoom) return;
   await mutate(`/api/projects/${state.project.id}/zoom-update`, { id: state.selectedZoom, ...body });
 }
+
+async function patchFocusEffect(patch) {
+  const selected = state.project?.zooms?.find((zoom) => zoom.id === state.selectedZoom);
+  if (!selected?.focus_effect) return;
+  await updateZoom({ focus_effect: { ...selected.focus_effect, ...patch } });
+}
+
+let countdownTimer = null;
+let countdownToken = 0;
+
+function clearCountdown() {
+  if (countdownTimer) {
+    clearTimeout(countdownTimer);
+    countdownTimer = null;
+  }
+}
+
+async function beginRecording() {
+  if (state.countdown != null || state.recording.active || state.recordDecision) return;
+  const seconds = Math.max(0, Number(state.record.countdown) || 0);
+  if (seconds <= 0) {
+    await startRecording();
+    return;
+  }
+  const token = ++countdownToken;
+  state.recorderPopover = null;
+  state.countdown = seconds;
+  render();
+  const tick = () => {
+    if (token !== countdownToken) return;
+    if (state.countdown == null) return;
+    if (state.countdown <= 1) {
+      state.countdown = null;
+      startRecording();
+      return;
+    }
+    state.countdown -= 1;
+    const orb = document.querySelector(".countdown-orb");
+    if (orb) {
+      orb.textContent = String(state.countdown);
+      orb.classList.remove("pulse");
+      void orb.offsetWidth;
+      orb.classList.add("pulse");
+    } else {
+      render();
+    }
+    countdownTimer = setTimeout(tick, 1000);
+  };
+  countdownTimer = setTimeout(tick, 1000);
+}
+
+async function discardLiveRecording() {
+  clearCountdown();
+  countdownToken += 1;
+  state.countdown = null;
+  try {
+    await api("/api/record/discard", { method: "POST", body: {} });
+    state.recording = { active: false, elapsed: 0 };
+    state.recordDecision = null;
+    toast(state.lang === "zh" ? "已丢弃本次录制" : "Take discarded");
+    render();
+  } catch (error) { toast(error.message); }
+}
+
+async function discardRecordDecision() {
+  const decision = state.recordDecision;
+  if (!decision?.id) {
+    state.recordDecision = null;
+    render();
+    return;
+  }
+  try {
+    await api(`/api/projects/${decision.id}`, { method: "DELETE" });
+    state.recordDecision = null;
+    state.recording = { active: false, elapsed: 0 };
+    state.projects = await api("/api/projects");
+    toast(state.lang === "zh" ? "已丢弃本次录制" : "Take discarded");
+    render();
+  } catch (error) { toast(error.message); }
+}
+
+async function saveRecordDecision() {
+  const decision = state.recordDecision;
+  if (!decision?.id) return;
+  state.recordDecision = null;
+  await openProject(decision.id);
+}
 async function updateMotion(body) {
   if (!state.selectedMotion) return;
   await mutate(`/api/projects/${state.project.id}/screen-motion-update`, { id: state.selectedMotion, ...body });
@@ -1723,6 +2322,100 @@ async function updateMotion(body) {
 async function updateMosaic(body) {
   if (!state.selectedMosaic) return;
   await mutate(`/api/projects/${state.project.id}/mosaic-update`, { id: state.selectedMosaic.id, ...body });
+}
+async function updateSticker(body) {
+  if (!state.selectedSticker) return;
+  await mutate(`/api/projects/${state.project.id}/sticker-update`, { id: state.selectedSticker.id, ...body });
+}
+
+async function nudgeStickerLayer(delta) {
+  if (!state.selectedSticker) return;
+  const stickers = [...(state.project.stickers || [])].sort(
+    (a, b) => Number(a.layer_index || 0) - Number(b.layer_index || 0)
+  );
+  const index = stickers.findIndex((item) => item.id === state.selectedSticker.id);
+  const next = index + delta;
+  if (index < 0 || next < 0 || next >= stickers.length) return;
+  const current = stickers[index];
+  const neighbor = stickers[next];
+  const currentLayer = Number(current.layer_index || index);
+  const neighborLayer = Number(neighbor.layer_index || next);
+  await mutate(`/api/projects/${state.project.id}/sticker-update`, {
+    id: current.id,
+    layer_index: neighborLayer,
+  });
+  await mutate(`/api/projects/${state.project.id}/sticker-update`, {
+    id: neighbor.id,
+    layer_index: currentLayer,
+  });
+}
+
+function copyEffectClipboard() {
+  if (state.selectedZoom) {
+    const zoom = state.project.zooms.find((item) => item.id === state.selectedZoom);
+    if (!zoom) return false;
+    const { id, clip_id, start, end, ...attrs } = zoom;
+    state.effectClipboard = { kind: "zoom", attrs };
+    return true;
+  }
+  if (state.selectedMotion) {
+    const motion = (state.project.screen_motions || []).find((item) => item.id === state.selectedMotion);
+    if (!motion) return false;
+    const { id, clip_id, start, end, ...attrs } = motion;
+    state.effectClipboard = { kind: "motion", attrs };
+    return true;
+  }
+  if (state.selectedMosaic) {
+    const { id, clip_id, start, end, ...attrs } = state.selectedMosaic;
+    state.effectClipboard = { kind: "mosaic", attrs };
+    return true;
+  }
+  if (state.selectedSticker) {
+    const { id, clip_id, start, end, path, layer_index, ...attrs } = state.selectedSticker;
+    state.effectClipboard = { kind: "sticker", attrs };
+    return true;
+  }
+  return false;
+}
+
+function pasteEffectClipboard() {
+  const clip = state.effectClipboard;
+  if (!clip) return false;
+  if (clip.kind === "zoom" && state.selectedZoom) {
+    updateZoom({ ...clip.attrs });
+    toast(state.lang === "zh" ? "已粘贴运镜属性" : "Zoom attributes pasted");
+    return true;
+  }
+  if (clip.kind === "motion" && state.selectedMotion) {
+    updateMotion({ ...clip.attrs });
+    toast(state.lang === "zh" ? "已粘贴 3D 属性" : "Motion attributes pasted");
+    return true;
+  }
+  if (clip.kind === "mosaic" && state.selectedMosaic) {
+    updateMosaic({ ...clip.attrs });
+    toast(state.lang === "zh" ? "已粘贴马赛克属性" : "Mosaic attributes pasted");
+    return true;
+  }
+  if (clip.kind === "sticker" && state.selectedSticker) {
+    updateSticker({ ...clip.attrs });
+    toast(state.lang === "zh" ? "已粘贴贴图属性" : "Sticker attributes pasted");
+    return true;
+  }
+  toast(state.lang === "zh" ? "没有可粘贴的同类效果" : "No compatible effect to paste");
+  return true;
+}
+async function updateClipAudio(body) {
+  const clip = Z.locateTimeline(state.project.clips, state.time)?.clip;
+  if (!clip) return;
+  await mutate(`/api/projects/${state.project.id}/clip-audio`, { id: clip.id, ...body });
+}
+async function toggleRecordPause() {
+  try {
+    const path = state.recording.paused ? "/api/record/resume" : "/api/record/pause";
+    state.recording = await api(path, { method: "POST", body: {} });
+    render();
+    if (state.recording.active && !state.recording.paused) pollRecording();
+  } catch (error) { toast(error.message); }
 }
 
 async function mutate(path, body) {
@@ -1798,6 +2491,8 @@ async function startRecording() {
       state.record.cameraDevice = state.sources.cameras?.[0]?.id || null;
     }
     state.recorderPopover = null;
+    state.countdown = null;
+    state.recordDecision = null;
     state.recording = await api("/api/record/start", { method: "POST", body: {
       source: state.record.source,
       display_index: state.record.display,
@@ -1814,15 +2509,26 @@ async function startRecording() {
     state.view = "home";
     render();
     pollRecording();
-  } catch (error) { toast(error.message); }
+  } catch (error) {
+    state.countdown = null;
+    render();
+    toast(error.message);
+  }
 }
 
 async function pollRecording() {
   if (state.view !== "home" && state.view !== "record") return;
+  if (state.recordDecision || state.countdown != null) return;
   try { state.recording = await api("/api/record"); } catch (error) { return; }
   const elapsed = document.querySelector("#elapsed");
-  if (elapsed) elapsed.textContent = formatTime(state.recording.elapsed || 0);
-  if (state.recording.active) setTimeout(pollRecording, 300);
+  if (elapsed) {
+    const paused = state.recording.paused ? `<em>${state.lang === "zh" ? "已暂停" : "Paused"}</em>` : "";
+    elapsed.innerHTML = `${formatTime(state.recording.elapsed || 0)}${paused}`;
+  }
+  const capsule = document.querySelector(".recorder-capsule.is-live");
+  if (capsule) capsule.classList.toggle("is-paused", !!state.recording.paused);
+  if (state.recording.active && !state.recording.paused) setTimeout(pollRecording, 300);
+  else if (state.recording.active && state.recording.paused) setTimeout(pollRecording, 800);
   else if (document.querySelector(".record-go.live")) render();
 }
 
@@ -1830,7 +2536,9 @@ async function stopRecording() {
   try {
     const project = await api("/api/record/stop", { method: "POST", body: {} });
     state.recording = { active: false, elapsed: 0 };
-    await openProject(project.id);
+    state.recordDecision = project;
+    state.projects = await api("/api/projects");
+    render();
   } catch (error) { toast(error.message); }
 }
 
@@ -1909,10 +2617,22 @@ function paintCanvas() {
   }
   const opening = project.opening || {};
   if (!state.cropping && opening.enabled && state.time < Number(opening.duration || 1.4)) {
-    const p = state.time / Number(opening.duration || 1.4);
-    const startScale = opening.preset === "sideSlide" ? 0.85 : opening.preset === "light3D" ? 0.92 : 0.72;
-    shell.style.transform += ` scale(${startScale + (1 - startScale) * p})`;
-    if (opening.preset === "light3D") shell.style.transform += ` rotateY(${(-18 + 18 * p)}deg)`;
+    const order = openingElementOrder(opening).filter((id) => {
+      if (id === "screen") return opening.include_screen !== false;
+      if (id === "camera") return opening.include_camera !== false;
+      return opening.include_stickers !== false;
+    });
+    const stagger = Number(opening.stagger ?? 0.12);
+    const screenIndex = Math.max(order.indexOf("screen"), 0);
+    const local = Math.max(state.time - screenIndex * stagger, 0);
+    const span = Math.max(Number(opening.duration || 1.4) - screenIndex * stagger, 0.18);
+    const p = Math.min(local / span, 1);
+    if (opening.include_screen !== false) {
+      const startScale = opening.preset === "sideSlide" ? 0.85 : opening.preset === "light3D" ? 0.92 : 0.72;
+      shell.style.transform += ` scale(${startScale + (1 - startScale) * p})`;
+      if (opening.preset === "light3D") shell.style.transform += ` rotateY(${(-18 + 18 * p)}deg)`;
+      if (opening.preset === "sideSlide") shell.style.transform += ` translateX(${(1 - p) * -8}%)`;
+    }
   }
   placeCursor(state.cropping ? null : Z.locateTimeline(project.clips, state.time), view);
   placeFocusDot(view);
@@ -2002,6 +2722,56 @@ function placeFocusDot(view) {
   focus.style.top = `${((fy - view.top) / view.size) * 100}%`;
 }
 
+function paintFocusEffectOverlay(parts) {
+  const zooms = Z.absoluteZooms ? Z.absoluteZooms(state.project.clips, state.project.zooms) : null;
+  const abs = zooms || (state.project.zooms || []).map((zoom) => {
+    const rows = Z.layout(state.project.clips);
+    const row = rows.find((entry) => entry.id === zoom.clip_id);
+    if (!row) return null;
+    return { ...zoom, start: row.start + Number(zoom.start || 0), end: row.start + Number(zoom.end || 0) };
+  }).filter(Boolean);
+  let active = null;
+  let amount = 0;
+  for (const zoom of abs) {
+    if (!zoom.focus_effect) continue;
+    const progress = typeof Z.progressAt === "function"
+      ? Z.progressAt(zoom, state.time)
+      : (() => {
+          const start = Number(zoom.start);
+          const end = Number(zoom.end);
+          const enter = Math.max(Number(zoom.enter || 0), 0);
+          const exit = Math.max(Number(zoom.exit || 0), 0);
+          if (state.time < start || state.time > end + exit) return 0;
+          if (enter > 0.001 && state.time < start + enter) return (state.time - start) / enter;
+          if (state.time <= end) return 1;
+          if (exit > 0.001) return 1 - (state.time - end) / exit;
+          return 0;
+        })();
+    if (progress <= 0) continue;
+    if (!active || Number(zoom.start) >= Number(active.start)) {
+      active = zoom;
+      amount = progress;
+    }
+  }
+  if (!active || amount <= 0) return;
+  const effect = active.focus_effect;
+  const size = Z.clamp(Number(effect.size ?? 0.45), 0.1, 1);
+  const blur = Z.clamp(Number(effect.blur ?? 0.35), 0, 1);
+  const softness = Z.clamp(Number(effect.softness ?? 0.5), 0, 1);
+  const dimming = Z.clamp(Number(effect.dimming ?? 0.18), 0, 1) * amount;
+  const clear = size * 50;
+  const feather = Math.max(clear * softness * 0.55, 4);
+  const fx = Number(active.focus_x ?? 0.5) * 100;
+  const fy = Number(active.focus_y ?? 0.5) * 100;
+  const blurPx = (4 + blur * 22 * amount).toFixed(1);
+  const mask = `radial-gradient(circle at ${fx}% ${fy}%, transparent ${Math.max(clear - feather, 0)}%, rgba(0,0,0,0.92) ${clear + feather}%)`;
+  parts.push(
+    `<div class="overlay-focus" aria-hidden="true" style="`
+    + `--focus-blur:${blurPx}px;--focus-dim:${dimming.toFixed(3)};`
+    + `-webkit-mask-image:${mask};mask-image:${mask}"></div>`
+  );
+}
+
 function paintStageOverlays() {
   const host = document.querySelector("#overlays");
   if (!host || !state.project || state.cropping) {
@@ -2009,29 +2779,69 @@ function paintStageOverlays() {
     return;
   }
   const parts = [];
+  paintFocusEffectOverlay(parts);
   for (const item of (state.project.mosaics || []).map(absoluteItem)) {
     if (state.time < item.start || state.time > item.end) continue;
     const intensity = Number(item.intensity || 0.55);
     const blur = 4 + intensity * 18;
     const selected = state.selectedMosaic && item.id === state.selectedMosaic.id;
-    const alpha = (0.12 + intensity * 0.25).toFixed(3);
+    const spotlight = item.style === "spotlight";
+    const dim = Number(item.dimming || 0.22);
+    const alpha = spotlight ? dim.toFixed(3) : (0.12 + intensity * 0.25).toFixed(3);
     const radius = ((item.corner_radius || 0.08) * 40).toFixed(1);
+    const fill = spotlight
+      ? `box-shadow:0 0 0 9999px rgba(8,10,14,${alpha});background:transparent;backdrop-filter:none`
+      : `backdrop-filter:blur(${blur}px);background:rgba(20,22,28,${alpha})`;
     parts.push(
-      `<div class="overlay-mosaic${selected ? " selected" : ""}" data-overlay="mosaic" data-id="${item.id}" `
+      `<div class="overlay-mosaic${selected ? " selected" : ""}${spotlight ? " is-spotlight" : ""}" data-overlay="mosaic" data-id="${item.id}" `
       + `style="left:${item.x * 100}%;top:${item.y * 100}%;width:${item.width * 100}%;height:${item.height * 100}%;`
-      + `border-radius:${radius}px;backdrop-filter:blur(${blur}px);background:rgba(20,22,28,${alpha})">`
+      + `border-radius:${radius}px;${fill}">`
       + `<i class="overlay-handle" data-handle="nw"></i><i class="overlay-handle" data-handle="ne"></i>`
       + `<i class="overlay-handle" data-handle="se"></i><i class="overlay-handle" data-handle="sw"></i></div>`
     );
   }
-  for (const item of (state.project.stickers || []).map(absoluteItem)) {
+  const stickersNow = (state.project.stickers || [])
+    .map(absoluteItem)
+    .sort((a, b) => Number(a.layer_index || 0) - Number(b.layer_index || 0));
+  for (const item of stickersNow) {
     if (state.time < item.start || state.time > item.end) continue;
     const selected = state.selectedSticker && item.id === state.selectedSticker.id;
     const opacity = item.opacity == null ? 1 : item.opacity;
+    const border = Number(item.border || 0);
+    const shadow = item.shadow == null ? 0.28 : Number(item.shadow);
+    const blur = Number(item.backdrop_blur || 0);
+    const enter = Number(item.enter ?? 0.7);
+    const exit = Number(item.exit ?? 0.22);
+    const into = enter > 0 ? Math.min(Math.max((state.time - item.start) / enter, 0), 1) : 1;
+    const outo = exit > 0 ? Math.min(Math.max((item.end - state.time) / exit, 0), 1) : 1;
+    const anim = item.animation || "pop";
+    const exitAnim = item.exit_animation || "none";
+    let animScale = 1;
+    let animOpacity = opacity;
+    let animShift = 0;
+    if (into < 1 && anim !== "none") {
+      animScale = anim === "pop" ? 0.72 + 0.28 * into : 1;
+      animOpacity = anim === "fade" || anim === "pop" ? opacity * into : opacity;
+      animShift = anim === "slide" ? (1 - into) * 18 : 0;
+    } else if (outo < 1 && exitAnim !== "none") {
+      animScale = exitAnim === "pop" ? 0.72 + 0.28 * outo : 1;
+      animOpacity = exitAnim === "fade" || exitAnim === "pop" ? opacity * outo : opacity;
+      animShift = exitAnim === "slide" ? (1 - outo) * -14 : 0;
+    }
+    const filterParts = [];
+    if (shadow > 0.01) filterParts.push(`drop-shadow(0 ${6 + shadow * 10}px ${12 + shadow * 18}px rgba(0,0,0,${0.12 + shadow * 0.4}))`);
+    if (blur > 0) filterParts.push(`blur(0px)`);
     parts.push(
       `<div class="overlay-sticker${selected ? " selected" : ""}" data-overlay="sticker" data-id="${item.id}" `
-      + `style="left:${item.x * 100}%;top:${item.y * 100}%;width:${item.width * 100}%;opacity:${opacity};`
-      + `transform:translate(-50%,-50%) rotate(${item.rotation || 0}deg);border-radius:${item.corner_radius || 18}px">`
+      + `style="left:${item.x * 100}%;top:${item.y * 100}%;width:${item.width * 100}%;opacity:${animOpacity};`
+      + `z-index:${10 + Number(item.layer_index || 0)};`
+      + `transform:translate(-50%,-50%) translateY(${animShift}px) rotate(${item.rotation || 0}deg) scale(${animScale});`
+      + `border-radius:${item.corner_radius || 18}px;`
+      + (border > 0 ? `outline:${border}px solid ${item.border_color || "#fff"};outline-offset:0;` : "")
+      + (filterParts.length ? `filter:${filterParts.join(" ")};` : "")
+      + (blur > 0 ? `--sticker-backdrop:${blur}px;` : "")
+      + `">`
+      + (blur > 0 ? `<i class="sticker-backdrop" style="backdrop-filter:blur(${blur}px);border-radius:inherit"></i>` : "")
       + `<img src="/api/projects/${state.project.id}/${escapeHtml(item.path)}" alt="" draggable="false"></div>`
     );
   }
@@ -2389,17 +3199,84 @@ async function openExportSheet() {
   await refreshExportEstimate();
 }
 
+function selectionExportRange() {
+  const ids = new Set(state.selectedClipIds || []);
+  if (!ids.size || !state.project) return null;
+  const rows = Z.layout(state.project.clips).filter((row) => ids.has(row.id));
+  if (!rows.length) return null;
+  return {
+    start: Math.min(...rows.map((row) => row.start)),
+    end: Math.max(...rows.map((row) => row.start + row.duration)),
+    ids: [...ids],
+  };
+}
+
+function selectTimelineClip(clipId, event) {
+  const additive = event?.metaKey || event?.ctrlKey;
+  const range = event?.shiftKey;
+  const current = state.selectedClipIds || [];
+  if (additive) {
+    state.selectedClipIds = current.includes(clipId)
+      ? current.filter((id) => id !== clipId)
+      : [...current, clipId];
+  } else if (range && current.length) {
+    const rows = Z.layout(state.project.clips);
+    const anchor = current[current.length - 1];
+    const a = rows.findIndex((row) => row.id === anchor);
+    const b = rows.findIndex((row) => row.id === clipId);
+    if (a >= 0 && b >= 0) {
+      const from = Math.min(a, b);
+      const to = Math.max(a, b);
+      state.selectedClipIds = rows.slice(from, to + 1).map((row) => row.id);
+    } else {
+      state.selectedClipIds = [clipId];
+    }
+  } else {
+    state.selectedClipIds = [clipId];
+  }
+  const row = Z.layout(state.project.clips).find((item) => item.id === clipId);
+  if (row) {
+    state.time = row.start + Math.min(0.05, row.duration / 2);
+    state.playing = false;
+    updatePlayButton();
+  }
+  state.selectedZoom = null;
+  state.selectedMotion = null;
+  state.selectedMosaic = null;
+  state.selectedSticker = null;
+  drawTimeline();
+  paintCanvas();
+  syncTransport();
+}
+
 async function refreshExportEstimate() {
   if (!state.project || !state.exportSheet) return;
   try {
+    const exp = state.project.export || {};
+    if (exp.scope === "selection") {
+      const range = selectionExportRange();
+      if (range) {
+        await meta({
+          export: {
+            ...exp,
+            range_start: range.start,
+            range_end: range.end,
+            selected_ids: range.ids,
+          },
+        });
+      }
+    }
     const estimate = await api(`/api/projects/${state.project.id}/export/estimate`);
     if (!state.exportSheet) return;
     state.exportSheet.estimate = estimate;
-    const meta = document.querySelector(".export-meta");
-    if (meta) {
-      meta.innerHTML = `<div><span>${state.lang === "zh" ? "分辨率" : "Size"}</span><strong>${estimate.width}×${estimate.height}</strong></div>
-        <div><span>${state.lang === "zh" ? "时长" : "Duration"}</span><strong>${formatTime(estimate.duration)}</strong></div>
-        <div><span>${state.lang === "zh" ? "估大小" : "Est."}</span><strong>${formatBytes(estimate.bytes)}</strong></div>`;
+    const metaNode = document.querySelector(".export-meta");
+    if (metaNode) {
+      const zh = state.lang === "zh";
+      const kind = estimate.kind || exp.kind || "video";
+      const size = kind === "audio" ? (zh ? "音频" : "Audio") : `${estimate.width}×${estimate.height}`;
+      metaNode.innerHTML = `<div><span>${zh ? "分辨率" : "Size"}</span><strong>${size}</strong></div>
+        <div><span>${zh ? "时长" : "Duration"}</span><strong>${formatTime(estimate.duration)}</strong></div>
+        <div><span>${zh ? "估大小" : "Est."}</span><strong>${formatBytes(estimate.bytes)}</strong></div>`;
     }
   } catch (error) {
     toast(error.message);
@@ -2408,12 +3285,26 @@ async function refreshExportEstimate() {
 
 async function startExportFromSheet() {
   if (!state.exportSheet || !state.project) return;
+  const exp = state.project.export || {};
+  const kind = exp.kind || "video";
+  const scope = exp.scope || "full";
+  const body = { kind, scope };
+  if (scope === "selection") {
+    const range = selectionExportRange();
+    if (!range) {
+      toast(state.lang === "zh" ? "请先多选片段" : "Select clips first");
+      return;
+    }
+    body.range_start = range.start;
+    body.range_end = range.end;
+    body.selected_ids = range.ids;
+  }
   state.exportSheet.state = "running";
   state.exportSheet.progress = 0.02;
   state.exportSheet.error = null;
   render();
   try {
-    await api(`/api/projects/${state.project.id}/export`, { method: "POST", body: {} });
+    await api(`/api/projects/${state.project.id}/export`, { method: "POST", body });
     for (let attempt = 0; attempt < 600; attempt += 1) {
       const status = await api(`/api/projects/${state.project.id}/export/status`);
       if (!state.exportSheet) return;
@@ -2425,8 +3316,9 @@ async function startExportFromSheet() {
         state.exportSheet.state = "done";
         toast(state.lang === "zh" ? "导出完成" : "Export ready");
         const link = document.createElement("a");
+        const suffix = (status.kind || kind) === "audio" ? "m4a" : "mp4";
         link.href = `/api/projects/${state.project.id}/export/file`;
-        link.download = `${state.project.name || "dogsc"}.mp4`;
+        link.download = `${state.project.name || "dogsc"}.${suffix}`;
         document.body.appendChild(link);
         link.click();
         link.remove();
@@ -2495,9 +3387,10 @@ function drawTimeline() {
     ruler.append(mark);
   }
   const locatedClip = Z.locateTimeline(state.project.clips, state.time)?.clip;
+  const selectedIds = new Set(state.selectedClipIds || []);
   const clipLane = makeLane(state.timelineMode === "waveform" ? "波形" : "画面", rows, (lane, row) => {
     const node = document.createElement("div");
-    const selected = locatedClip && locatedClip.id === row.id;
+    const selected = selectedIds.has(row.id) || (!selectedIds.size && locatedClip && locatedClip.id === row.id);
     node.className = `clip${selected ? " selected" : ""}`;
     node.dataset.clipId = row.id;
     node.style.left = `${(row.start / duration) * 100}%`;
@@ -2505,6 +3398,11 @@ function drawTimeline() {
     node.innerHTML = `<span class="handle left"></span><span class="handle right"></span>`;
     node.onpointerenter = () => node.classList.add("hovered");
     node.onpointerleave = () => node.classList.remove("hovered");
+    node.onclick = (event) => {
+      if (event.target.closest(".handle")) return;
+      event.stopPropagation();
+      selectTimelineClip(row.id, event);
+    };
     if (state.timelineMode === "waveform") {
       node.style.background = "linear-gradient(180deg,#3a3d44,#2a2d33)";
       const canvas = document.createElement("canvas");
@@ -2594,7 +3492,7 @@ function drawTimeline() {
     node.style.width = `${Math.max((item.end - item.start) / duration * 100, 1)}%`;
     node.onpointerenter = () => node.classList.add("hovered");
     node.onpointerleave = () => node.classList.remove("hovered");
-    node.onclick = () => { state.selectedMosaic = item; state.tab = "motion"; render(); };
+    node.onclick = () => { state.selectedMosaic = item; state.selectedSticker = null; state.selectedZoom = null; state.tab = "motion"; render(); };
     lane.append(node);
   });
   if (!mosaics.length) {
@@ -2946,11 +3844,86 @@ window.addEventListener("keydown", (event) => {
       });
     }
   }
-  if ((event.key === "Delete" || event.key === "Backspace") && state.view === "editor" && state.selectedMarker) {
-    event.preventDefault();
-    api(`/api/projects/${state.project.id}/marker-delete`, { method: "POST", body: { id: state.selectedMarker } })
-      .then((project) => { state.project = project; state.selectedMarker = null; render(); })
-      .catch((error) => toast(error.message));
+  if ((event.key === "q" || event.key === "w") && state.view === "editor" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    const clip = Z.locateTimeline(state.project.clips, state.time)?.clip;
+    if (clip) {
+      event.preventDefault();
+      mutate(`/api/projects/${state.project.id}/trim`, {
+        id: clip.id,
+        edge: event.key === "q" ? "start" : "end",
+        time: state.time,
+      });
+    }
+  }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "c" && state.view === "editor" && !event.shiftKey && !event.altKey) {
+    if (copyEffectClipboard()) {
+      event.preventDefault();
+      toast(state.lang === "zh" ? "已复制效果属性" : "Effect attributes copied");
+    }
+  }
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "v" && state.view === "editor") {
+    if (pasteEffectClipboard()) event.preventDefault();
+  }
+  if ((event.key === "Delete" || event.key === "Backspace") && state.view === "editor") {
+    if (state.selectedMarker) {
+      event.preventDefault();
+      api(`/api/projects/${state.project.id}/marker-delete`, { method: "POST", body: { id: state.selectedMarker } })
+        .then((project) => { state.project = project; state.selectedMarker = null; render(); })
+        .catch((error) => toast(error.message));
+      return;
+    }
+    if (state.selectedSticker) {
+      event.preventDefault();
+      api(`/api/projects/${state.project.id}/stickers/${state.selectedSticker.id}`, { method: "DELETE" })
+        .then((project) => { state.project = project; state.selectedSticker = null; render(); })
+        .catch((error) => toast(error.message));
+      return;
+    }
+    if (state.selectedMosaic) {
+      event.preventDefault();
+      api(`/api/projects/${state.project.id}/mosaics/${state.selectedMosaic.id}`, { method: "DELETE" })
+        .then((project) => { state.project = project; state.selectedMosaic = null; render(); })
+        .catch((error) => toast(error.message));
+      return;
+    }
+    if (state.selectedZoom) {
+      event.preventDefault();
+      api(`/api/projects/${state.project.id}/zooms/${state.selectedZoom}`, { method: "DELETE" })
+        .then((project) => { state.project = project; state.selectedZoom = null; render(); })
+        .catch((error) => toast(error.message));
+      return;
+    }
+    if (state.selectedMotion) {
+      event.preventDefault();
+      api(`/api/projects/${state.project.id}/screen-motions/${state.selectedMotion}`, { method: "DELETE" })
+        .then((project) => { state.project = project; state.selectedMotion = null; render(); })
+        .catch((error) => toast(error.message));
+      return;
+    }
+    const ids = (state.selectedClipIds || []).filter(Boolean);
+    if (ids.length > 1) {
+      event.preventDefault();
+      api(`/api/projects/${state.project.id}/delete-clips`, { method: "POST", body: { ids } })
+        .then((project) => {
+          state.project = project;
+          state.selectedClipIds = [];
+          render();
+        })
+        .catch((error) => toast(error.message));
+      return;
+    }
+    if (ids.length === 1 || Z.locateTimeline(state.project.clips, state.time)?.clip) {
+      const clipId = ids[0] || Z.locateTimeline(state.project.clips, state.time)?.clip?.id;
+      if (!clipId) return;
+      event.preventDefault();
+      api(`/api/projects/${state.project.id}/delete-clip`, { method: "POST", body: { id: clipId } })
+        .then((project) => {
+          state.project = project;
+          state.selectedClipIds = (state.selectedClipIds || []).filter((id) => id !== clipId);
+          render();
+        })
+        .catch((error) => toast(error.message));
+    }
   }
 });
 
@@ -2973,6 +3946,7 @@ async function boot() {
     state.env = await api("/api/environment");
     state.projects = await api("/api/projects");
     await loadSources();
+    await loadPresets();
     ensureWallpapers();
   } catch (error) {
     toast(error.message);

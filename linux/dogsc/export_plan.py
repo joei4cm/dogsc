@@ -11,6 +11,47 @@ from dogsc.model import clamp_crop
 from dogsc.zoom import absolute_zooms, clip_duration, sample, viewport
 
 
+def focus_effect_filters(zooms: list[dict], source: str, content_w: int, content_h: int) -> tuple[list[str], str]:
+    """Approximate Apple FocusEffect: blurred/dimmed field with a soft clear disc."""
+    current = source
+    parts: list[str] = []
+    for index, zoom in enumerate(zooms):
+        effect = zoom.get("focus_effect")
+        if not isinstance(effect, dict):
+            continue
+        start = float(zoom.get("start") or 0)
+        end = float(zoom.get("end") or start) + float(zoom.get("exit") or 0)
+        if end - start < 0.05:
+            continue
+        size = min(max(float(effect.get("size") or 0.45), 0.1), 1.0)
+        blur_strength = min(max(float(effect.get("blur") or 0.35), 0), 1.0)
+        soft = min(max(float(effect.get("softness") or 0.5), 0), 1.0)
+        dim = min(max(float(effect.get("dimming") or 0.18), 0), 0.8)
+        blur = max(int(4 + 32 * blur_strength), 2)
+        radius = max(min(content_w, content_h) * size * 0.5, 8)
+        feather = max(radius * (0.15 + soft * 0.55), 4)
+        # After zoom framing the authored focus sits near the content center.
+        cx = content_w * 0.5
+        cy = content_h * 0.5
+        outer = radius + feather
+        next_label = f"focus{index}"
+        enable = f"between({time_token()},{start:.3f},{end:.3f})"
+        # Soft radial mix: keep sharp disc, blend to blurred+dimmed field.
+        mix = (
+            f"if(lt(hypot(X-{cx:.1f},Y-{cy:.1f}),{radius:.1f}),A,"
+            f"if(gt(hypot(X-{cx:.1f},Y-{cy:.1f}),{outer:.1f}),B,"
+            f"A*(1-(hypot(X-{cx:.1f},Y-{cy:.1f})-{radius:.1f})/{feather:.1f})"
+            f"+B*((hypot(X-{cx:.1f},Y-{cy:.1f})-{radius:.1f})/{feather:.1f})))"
+        )
+        parts.append(
+            f"[{current}]split[fes{index}][feb{index}];"
+            f"[feb{index}]boxblur={blur}:2,eq=brightness=-{dim:.3f}[feblur{index}];"
+            f"[fes{index}][feblur{index}]blend=all_expr='{mix}':enable='{enable}'[{next_label}]"
+        )
+        current = next_label
+    return parts, current
+
+
 def even(value: float) -> int:
     number = int(round(value))
     number -= number % 2
@@ -321,13 +362,47 @@ def hex_color(value: str) -> str:
     return "0x" + text[1:]
 
 
+def export_window(project: dict) -> tuple[float, float] | None:
+    """Optional authored-timeline window for ranged / selection exports."""
+    export = project.get("export") or {}
+    clips = project.get("clips") or []
+    duration = max(sum(clip_duration(clip) for clip in clips), 0.1)
+    if export.get("range_start") is not None and export.get("range_end") is not None:
+        start = max(float(export["range_start"]), 0.0)
+        end = min(max(float(export["range_end"]), start + 0.05), duration)
+        if end - start >= 0.05:
+            return start, end
+    if str(export.get("scope") or "full") != "selection":
+        return None
+    selected = {str(item) for item in (export.get("selected_ids") or [])}
+    if not selected:
+        return None
+    rows: list[tuple[float, float]] = []
+    cursor = 0.0
+    for clip in clips:
+        length = clip_duration(clip)
+        if str(clip.get("id")) in selected:
+            rows.append((cursor, cursor + length))
+        cursor += length
+    if not rows:
+        return None
+    start = min(row[0] for row in rows)
+    end = max(row[1] for row in rows)
+    if end - start < 0.05:
+        return None
+    return start, min(end, duration)
+
+
 def build_export(project: dict, media: Path, pointer: list[dict], output: Path, work: Path) -> list[str]:
+    export = project.get("export") or {}
+    if str(export.get("kind") or "video") == "audio":
+        return build_audio_export(project, media, output)
+
     info = project["media"]
     src_w = int(info["width"])
     src_h = int(info["height"])
     canvas = project.get("canvas") or {}
     cursor = project.get("cursor") or {}
-    export = project.get("export") or {}
     fps = int(export.get("fps") or 30)
     crop = clamp_crop(canvas.get("crop"))
     cropped_w = max(even(src_w * float(crop["width"])), 2)
@@ -491,14 +566,19 @@ def build_export(project: dict, media: Path, pointer: list[dict], output: Path, 
         f"[{current}]fps={fps},{crop_filter(zooms, box['content_w'], box['content_h'])}"
         f"{motion_filter},format=rgba[framed]"
     )
+    current = "framed"
+    focus_parts, current = focus_effect_filters(zooms, current, box["content_w"], box["content_h"])
+    graph.extend(focus_parts)
+    if current != "framed":
+        # Keep a stable label for opening / placement when focus filters ran.
+        graph.append(f"[{current}]format=rgba[focused]")
+        current = "focused"
 
     duration = max(sum(clip_duration(clip) for clip in project["clips"]), 0.1)
     opening = project.get("opening") or {}
     if opening.get("enabled"):
-        graph.append(_opening_filter("framed", "opened", opening, duration, box["content_w"], box["content_h"]))
+        graph.append(_opening_filter(current, "opened", opening, duration, box["content_w"], box["content_h"]))
         current = "opened"
-    else:
-        current = "framed"
 
     graph.append(f"[{bg_index}:v]scale={canvas_w}:{canvas_h},format=rgba[bg]")
     base = "bg"
@@ -536,6 +616,7 @@ def build_export(project: dict, media: Path, pointer: list[dict], output: Path, 
         )
         current = "framedui"
 
+    sticker_inputs.sort(key=lambda pair: (int(pair[1].get("layer_index") or 0), float(pair[1].get("start") or 0), pair[0]))
     for index, (input_index, sticker) in enumerate(sticker_inputs):
         width = max(even(float(sticker.get("width") or 0.22) * box["content_w"]), 2)
         x = int(box["x"] + float(sticker.get("x") or 0.72) * box["content_w"])
@@ -543,9 +624,17 @@ def build_export(project: dict, media: Path, pointer: list[dict], output: Path, 
         start = float(sticker["start"])
         end = float(sticker["end"])
         opacity = min(max(float(sticker.get("opacity") or 1), 0.05), 1)
+        border = max(int(float(sticker.get("border") or 0)), 0)
+        border_color = hex_color(str(sticker.get("border_color") or "#ffffff"))
         label = f"stk{index}"
+        chain = f"[{input_index}:v]scale={width}:-1,format=rgba"
+        if border > 0:
+            chain += f",pad=iw+{border * 2}:ih+{border * 2}:{border}:{border}:{border_color}"
+            x -= border
+            y -= border
+        chain += f",colorchannelmixer=aa={opacity:.3f}[{label}]"
         graph.append(
-            f"[{input_index}:v]scale={width}:-1,format=rgba,colorchannelmixer=aa={opacity:.3f}[{label}];"
+            f"{chain};"
             f"[{current}][{label}]overlay=x={x}:y={y}:enable='between({time_token()},{start:.3f},{end:.3f})'[stout{index}]"
         )
         current = f"stout{index}"
@@ -583,13 +672,27 @@ def build_export(project: dict, media: Path, pointer: list[dict], output: Path, 
             )
         current = "withcam"
 
-    graph.append(
-        f"[{current}]trim=duration={duration:.3f},setpts=PTS-STARTPTS,format=yuv420p[vout]"
-    )
+    window = export_window(project)
+    if window:
+        start, end = window
+        graph.append(
+            f"[{current}]trim=start={start:.3f}:end={end:.3f},setpts=PTS-STARTPTS,format=yuv420p[vout]"
+        )
+    else:
+        graph.append(
+            f"[{current}]trim=duration={duration:.3f},setpts=PTS-STARTPTS,format=yuv420p[vout]"
+        )
     maps = ["-map", "[vout]"]
     if info.get("has_audio"):
         graph.append(audio_segments(project["clips"], project.get("audio") or {}))
-        maps.extend(["-map", "[aout]", "-c:a", "aac", "-b:a", "192k"])
+        audio_label = "aout"
+        if window:
+            start, end = window
+            graph.append(
+                f"[aout]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS[aoutw]"
+            )
+            audio_label = "aoutw"
+        maps.extend(["-map", f"[{audio_label}]", "-c:a", "aac", "-b:a", "192k"])
     command = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
         *inputs,
@@ -601,6 +704,35 @@ def build_export(project: dict, media: Path, pointer: list[dict], output: Path, 
         str(output),
     ]
     return command
+
+
+def build_audio_export(project: dict, media: Path, output: Path) -> list[str]:
+    info = project.get("media") or {}
+    has_audio = bool(info.get("has_audio"))
+    if media.is_file():
+        try:
+            has_audio = bool(probe(media).get("has_audio"))
+        except Exception:
+            pass
+    if not has_audio:
+        raise DogSCError("当前项目没有可导出的音频。")
+    window = export_window(project)
+    graph = [audio_segments(project["clips"], project.get("audio") or {})]
+    audio_label = "aout"
+    if window:
+        start, end = window
+        graph.append(f"[aout]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS[aoutw]")
+        audio_label = "aoutw"
+    return [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-i", str(media),
+        "-filter_complex", ";".join(graph),
+        "-map", f"[{audio_label}]",
+        "-c:a", "aac", "-b:a", "192k",
+        "-vn",
+        "-movflags", "+faststart",
+        str(output),
+    ]
 
 
 def _render_background(path: Path, canvas: dict, width: int, height: int) -> None:
@@ -743,7 +875,11 @@ def estimate_export(project: dict, media: Path | None = None) -> dict:
     export = project.get("export") or {}
     clips = project.get("clips") or []
     duration = max(sum(clip_duration(clip) for clip in clips), 0.1)
+    window = export_window(project)
+    if window:
+        duration = max(window[1] - window[0], 0.05)
     fps = int(export.get("fps") or 30)
+    kind = str(export.get("kind") or "video")
     src_w = src_h = 1920
     if media and Path(media).is_file():
         try:
@@ -765,16 +901,23 @@ def estimate_export(project: dict, media: Path | None = None) -> dict:
         str(canvas.get("aspect") or "source"),
         str(export.get("resolution") or "1080p"),
     )
-    megapixels = (width * height) / 1_000_000
-    # Soft H.264-ish bitrate curve used only for UI sizing, not encoding.
-    mbps = max(2.5, min(28.0, 3.2 + megapixels * 2.4)) * (fps / 30)
     audio_mbps = 0.16
+    if kind == "audio":
+        mbps = 0.0
+        width = 0
+        height = 0
+    else:
+        megapixels = (width * height) / 1_000_000
+        # Soft H.264-ish bitrate curve used only for UI sizing, not encoding.
+        mbps = max(2.5, min(28.0, 3.2 + megapixels * 2.4)) * (fps / 30)
     bytes_est = int((mbps + audio_mbps) * 1_000_000 / 8 * duration)
     return {
         "width": width,
         "height": height,
         "fps": fps,
         "duration": duration,
+        "kind": kind,
+        "scope": str(export.get("scope") or "full"),
         "megabits_per_second": round(mbps + audio_mbps, 2),
         "bytes": bytes_est,
     }

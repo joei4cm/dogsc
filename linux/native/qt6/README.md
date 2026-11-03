@@ -2,37 +2,43 @@
 
 P0 graduation path for DogSC on Linux: **Qt 6 QML + Vulkan RHI**.
 
-This tree is the recommended native host for Soft Silver chrome parity with Apple
-(`Sources/DogSCApp`). It targets the gaps that the web bridge cannot close:
-
-| ID | Gap | Role here |
+| ID | Gap | Status here |
 |---|---|---|
-| **G01** | GPU preview (CIImage→CAMetalLayer) | `PreviewSurface.qml` → Vulkan `QQuickItem` |
-| **G03** | Floating recorder island (NSPanel + morph) | Capsule in `main.qml`; later frameless / layer-shell |
-| **G04** | Continuous corner curve | Large radii + future SDF squircle |
+| **G01** | GPU preview | `PreviewSurfaceItem` QSG texture; RHI backend reflected (`vulkan` preferred) |
+| **G02** | Native decode→texture | `presentMediaFrame` / `presentRgba` / `presentFrame` |
+| **G03** | Floating recorder island | `RecorderIsland.qml` + `IslandAnchor` (`layer-shell` / `screen`) |
+| **G04** | Continuous corners | `ContinuousPanel` + SDF `ContinuousSdfPanel` (qsb) |
 
-## Relationship to other stacks
+## Layout
 
-- **`linux/dogsc/web/*`** — interim Soft Silver chrome (CSS/JS). Keep shipping P1
-  pixel/UX there; do not treat the web `<video>` stage as the preview source of truth.
-- **Python ffmpeg sidecar** — stays for capture and export (portal / PipeWire in,
-  encode out). The Qt host owns chrome + GPU preview; it does not replace the
-  sidecar for media I/O.
-
-## Layout of this skeleton
-
-- `main.cpp` / `CMakeLists.txt` — Qt Quick host bootstrap
-- `main.qml` — Soft Silver shell stubs: stage dots, inspector rail (340–480),
-  timeline lanes (画面 / 运镜 / 马赛克), crop toolbar + overlay handles,
-  export sheet island, recorder capsule
-- `PreviewSurface.qml` — placeholder where the Vulkan QQuickItem plugs in
+| File | Role |
+|---|---|
+| `main.cpp` / `CMakeLists.txt` | Host bootstrap; DogSC types; Vulkan RHI preference; shader bake; layer-shell protocols |
+| `main.qml` | Soft Silver editor shell |
+| `PreviewSurfaceItem.*` | QSG preview plane + ffmpeg decode→texture |
+| `ContinuousCorner.*` / `ContinuousSdfPanel.qml` | Continuous path + GPU SDF fill |
+| `IslandAnchor.*` / `RecorderIsland.qml` | Frameless island + Wayland layer-shell / screen anchor |
+| `shaders/continuous_corner.*` | SDF vertex/fragment sources |
+| `protocols/wlr-layer-shell-unstable-v1.xml` | Vendored layer-shell protocol |
 
 Tokens: bg `#ecedef`, panel `#fdfdfe`, platinum `#1f1f1f`. Springs: settle ~380ms
 OutCubic, morph ~500ms. No purple chrome.
 
-## Build (when Qt6 is available)
+## Build
 
 ```bash
-cmake -S . -B build -DCMAKE_PREFIX_PATH=/path/to/Qt6
-cmake --build build
+sudo apt-get install -y \
+  qt6-base-dev qt6-declarative-dev qt6-shader-baker qt6-shadertools-dev \
+  libstdc++-14-dev libwayland-dev \
+  qml6-module-qtquick qml6-module-qtquick-controls \
+  qml6-module-qtquick-templates qml6-module-qtquick-layouts \
+  qml6-module-qtquick-window qml6-module-qtqml \
+  qml6-module-qtqml-workerscript qml6-module-qtqml-models
+
+./linux/native/qt6/smoke_build.sh
 ```
+
+## Pointer stream (G06)
+
+Python capture uses `dogsc.pointer.make_pointer_sampler` — libinput-evdev when
+`/dev/input/event*` is readable, otherwise X11 `PointerSampler`.

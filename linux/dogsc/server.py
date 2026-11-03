@@ -13,6 +13,15 @@ import webbrowser
 from dogsc.errors import DogSCError
 from dogsc.export_plan import build_export, estimate_export
 from dogsc.media import audio_peaks, probe, thumb_at
+from dogsc.presets import (
+    apply_preset_to_project,
+    delete_preset,
+    get_preset,
+    list_presets,
+    set_default_preset,
+    snapshot_from_project,
+    upsert_preset,
+)
 from dogsc.model import (
     ASPECTS,
     BACKGROUND_KINDS,
@@ -24,6 +33,7 @@ from dogsc.model import (
     FRAME_STYLES,
     MOSAIC_STYLES,
     OPENING_CURVES,
+    OPENING_ELEMENTS,
     OPENING_PRESETS,
     PATTERN_PRESETS,
     RESOLUTIONS,
@@ -32,6 +42,7 @@ from dogsc.model import (
     blank_sticker,
     clamp_crop,
     migrate,
+    normalize_opening_order,
 )
 from dogsc.wallpapers import list_wallpapers, resolve_wallpaper
 from dogsc.platform import detect
@@ -109,6 +120,8 @@ class Handler(BaseHTTPRequestHandler):
                 if target is None:
                     return self._error(404, "没有这张壁纸。")
                 return self._file(target, mimetypes.guess_type(target.name)[0] or "image/jpeg")
+            if path == "/api/presets":
+                return self._json(list_presets())
             if path.startswith("/api/projects/"):
                 return self._project_get(path)
             if path == "/" or path == "":
@@ -143,11 +156,21 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(APP.recorder.start(self._body()))
             if path == "/api/record/stop":
                 return self._json(APP.recorder.stop())
+            if path == "/api/record/discard":
+                return self._json(APP.recorder.discard())
+            if path == "/api/record/pause":
+                return self._json(APP.recorder.pause())
+            if path == "/api/record/resume":
+                return self._json(APP.recorder.resume())
             if path == "/api/record/marker":
                 body = self._body()
                 return self._json(APP.recorder.mark(str(body.get("label") or "")))
             if path == "/api/record/region":
                 return self._json(pick_region_for(detect()))
+            if path == "/api/presets":
+                return self._json(self._presets_post())
+            if path.startswith("/api/presets/"):
+                return self._json(self._preset_action(path))
             if path.startswith("/api/projects/"):
                 return self._project_post(path)
             return self._error(404, "没有这个接口。")
@@ -162,6 +185,8 @@ class Handler(BaseHTTPRequestHandler):
         path = unquote(urlparse(self.path).path)
         try:
             parts = [part for part in path.split("/") if part]
+            if len(parts) == 3 and parts[:2] == ["api", "presets"]:
+                return self._json(delete_preset(parts[2]))
             if len(parts) == 3 and parts[:2] == ["api", "projects"]:
                 delete(parts[2])
                 return self._json({"ok": True})
@@ -242,7 +267,10 @@ class Handler(BaseHTTPRequestHandler):
             file_path = job.get("path")
             if job.get("state") != "done" or not file_path or not Path(file_path).is_file():
                 return self._error(404, "导出文件还没准备好。")
-            return self._range(Path(file_path), "video/mp4", download=f"{load(project_id)['name']}.mp4")
+            kind = str(job.get("kind") or "video")
+            suffix = "m4a" if kind == "audio" else "mp4"
+            mime = "audio/mp4" if kind == "audio" else "video/mp4"
+            return self._range(Path(file_path), mime, download=f"{load(project_id)['name']}.{suffix}")
         return self._error(404, "没有这个接口。")
 
     def _project_post(self, path: str) -> None:
@@ -267,21 +295,19 @@ class Handler(BaseHTTPRequestHandler):
                 project["clips"], project["zooms"], project["markers"], float(body["time"])
             )
         elif action == "delete-clip":
-            clip_id = str(body["id"])
-            removed = next((clip for clip in project["clips"] if clip["id"] == clip_id), None)
-            if removed is not None:
-                bag = {
-                    "clip": removed,
-                    "zooms": [zoom for zoom in project["zooms"] if zoom.get("clip_id") == clip_id],
-                    "markers": [marker for marker in project["markers"] if marker.get("clip_id") == clip_id],
-                    "index": next((index for index, clip in enumerate(project["clips"]) if clip["id"] == clip_id), len(project["clips"])),
-                }
-                deleted = list(project.get("deleted_clips") or [])
-                deleted.append(bag)
-                project["deleted_clips"] = deleted[-20:]
-            project["clips"], project["zooms"], project["markers"] = delete_clip(
-                project["clips"], project["zooms"], project["markers"], clip_id
-            )
+            _delete_one_clip(project, str(body["id"]))
+        elif action == "delete-clips":
+            ids = [str(item) for item in (body.get("ids") or []) if str(item)]
+            if not ids:
+                raise DogSCError("没有要删除的片段。")
+            # Delete from the end so earlier indices stay stable while bagging undo.
+            ordered = [clip_id for clip_id in reversed([clip["id"] for clip in project["clips"]]) if clip_id in set(ids)]
+            if not ordered:
+                raise DogSCError("找不到要删除的片段。")
+            if len(project["clips"]) - len(ordered) < 1:
+                raise DogSCError("至少保留一段画面。")
+            for clip_id in ordered:
+                _delete_one_clip(project, clip_id)
         elif action == "restore-clip":
             deleted = list(project.get("deleted_clips") or [])
             if not deleted:
@@ -323,6 +349,8 @@ class Handler(BaseHTTPRequestHandler):
             project["clips"], project["zooms"] = set_speed(
                 project["clips"], project["zooms"], str(body["id"]), float(body["speed"])
             )
+        elif action == "clip-audio":
+            _update_clip_audio(project, body)
         elif action == "zoom":
             zoom = add_manual_zoom(
                 project["clips"], project["zooms"], float(body["time"]),
@@ -364,11 +392,35 @@ class Handler(BaseHTTPRequestHandler):
                 "label": str(body.get("label") or "标记"),
             })
         elif action == "export":
-            return self._json(_start_export(project))
+            return self._json(_start_export(project, body))
+        elif action == "apply-preset":
+            preset = get_preset(str(body.get("id") or ""))
+            project = apply_preset_to_project(project, preset)
         else:
             return self._error(404, "没有这个操作。")
         save(project)
         return self._json(project)
+
+    def _presets_post(self) -> dict:
+        body = self._body()
+        action = str(body.get("action") or "save")
+        if action == "default":
+            preset_id = body.get("id")
+            return set_default_preset(str(preset_id) if preset_id else None)
+        project_id = str(body.get("project_id") or "")
+        if not project_id:
+            raise DogSCError("保存场景预设需要项目。")
+        project = migrate(load(project_id))
+        preset_id = str(body["id"]) if body.get("id") else None
+        preset = snapshot_from_project(project, str(body.get("name") or ""), preset_id)
+        return upsert_preset(preset)
+
+    def _preset_action(self, path: str) -> dict:
+        parts = [part for part in path.split("/") if part]
+        # /api/presets/<id>/default
+        if len(parts) >= 4 and parts[3] == "default":
+            return set_default_preset(parts[2])
+        raise DogSCError("没有这个预设操作。")
 
     def _sticker_upload(self, project: dict) -> dict:
         content_type = self.headers.get("Content-Type", "")
@@ -555,6 +607,27 @@ def _apply_meta(project: dict, body: dict) -> None:
             raise DogSCError("导出帧率只支持 30 或 60。")
         export["resolution"] = resolution
         export["fps"] = fps
+        if "kind" in body["export"]:
+            kind = str(body["export"]["kind"])
+            if kind not in {"video", "audio"}:
+                raise DogSCError("导出类型只支持 video 或 audio。")
+            export["kind"] = kind
+        if "scope" in body["export"]:
+            scope = str(body["export"]["scope"])
+            if scope not in {"full", "selection"}:
+                raise DogSCError("导出范围只支持 full 或 selection。")
+            export["scope"] = scope
+            if scope == "full":
+                export.pop("range_start", None)
+                export.pop("range_end", None)
+                export.pop("selected_ids", None)
+        if "range_start" in body["export"] or "range_end" in body["export"]:
+            start = max(float(body["export"].get("range_start") or export.get("range_start") or 0), 0)
+            end = max(float(body["export"].get("range_end") or export.get("range_end") or start + 0.05), start + 0.05)
+            export["range_start"] = start
+            export["range_end"] = end
+        if "selected_ids" in body["export"] and isinstance(body["export"]["selected_ids"], list):
+            export["selected_ids"] = [str(item) for item in body["export"]["selected_ids"] if str(item)]
         project["export"] = export
     if "draw_cursor" in body:
         project["draw_cursor"] = bool(body["draw_cursor"])
@@ -680,6 +753,16 @@ def _merge_audio(audio: dict, incoming: dict) -> dict:
     return audio
 
 
+def _update_clip_audio(project: dict, body: dict) -> None:
+    clip_id = str(body.get("id") or "")
+    for clip in project["clips"]:
+        if clip.get("id") != clip_id:
+            continue
+        clip["audio"] = _merge_audio(clip.get("audio") or {}, body)
+        return
+    raise DogSCError("找不到这个片段。")
+
+
 def _merge_camera(camera: dict, incoming: dict) -> dict:
     camera = dict(camera)
     if "enabled" in incoming:
@@ -725,7 +808,32 @@ def _merge_opening(opening: dict, incoming: dict) -> dict:
     for key in ("include_screen", "include_camera", "include_stickers"):
         if key in incoming:
             opening[key] = bool(incoming[key])
+    if "element_order" in incoming:
+        order = incoming["element_order"]
+        if not isinstance(order, list):
+            raise DogSCError("开场顺序格式不正确。")
+        for item in order:
+            if str(item) not in OPENING_ELEMENTS:
+                raise DogSCError("开场元素不支持。")
+        opening["element_order"] = normalize_opening_order(order)
     return opening
+
+
+def _clamp01(value: float) -> float:
+    return min(max(float(value), 0), 1)
+
+
+def _normalize_focus_effect(value) -> dict | None:
+    if value is None or value is False:
+        return None
+    if not isinstance(value, dict):
+        raise DogSCError("焦点虚化参数不正确。")
+    return {
+        "size": min(max(float(value.get("size", 0.45)), 0.1), 1),
+        "blur": _clamp01(value.get("blur", 0.35)),
+        "softness": _clamp01(value.get("softness", 0.5)),
+        "dimming": _clamp01(value.get("dimming", 0.18)),
+    }
 
 
 def _update_zoom(project: dict, body: dict) -> None:
@@ -749,6 +857,12 @@ def _update_zoom(project: dict, body: dict) -> None:
             zoom["start"] = max(float(body["start"]), 0)
         if "end" in body:
             zoom["end"] = max(float(body["end"]), float(zoom["start"]))
+        if "focus_effect" in body:
+            effect = _normalize_focus_effect(body.get("focus_effect"))
+            if effect is None:
+                zoom.pop("focus_effect", None)
+            else:
+                zoom["focus_effect"] = effect
         return
     raise DogSCError("找不到这段运镜。")
 
@@ -791,11 +905,19 @@ def _make_sticker(project: dict, body: dict) -> dict:
         raise DogSCError("贴图路径不正确。")
     item = blank_sticker(max(local - 0.1, 0), min(local + 2.0, 60), path)
     item["clip_id"] = clip["id"]
-    for key in ("x", "y", "width", "rotation", "opacity", "corner_radius", "start", "end"):
+    for key in ("x", "y", "width", "rotation", "opacity", "corner_radius", "start", "end", "border", "shadow", "backdrop_blur", "enter", "exit"):
         if key in body:
             item[key] = float(body[key])
+    if "layer_index" in body:
+        item["layer_index"] = int(body["layer_index"])
+    if "border_color" in body:
+        color = str(body["border_color"])
+        if len(color) == 7 and color.startswith("#"):
+            item["border_color"] = color
     if "animation" in body:
         item["animation"] = str(body["animation"])
+    if "exit_animation" in body:
+        item["exit_animation"] = str(body["exit_animation"])
     return item
 
 
@@ -816,11 +938,49 @@ def _mosaic_fields(item: dict, body: dict) -> None:
 
 
 def _sticker_fields(item: dict, body: dict) -> None:
-    for key in ("x", "y", "width", "rotation", "opacity", "corner_radius", "start", "end"):
+    for key in ("x", "y", "width", "rotation", "opacity", "corner_radius", "start", "end", "border", "shadow", "backdrop_blur", "enter", "exit"):
         if key in body:
             item[key] = float(body[key])
+    if "border" in body:
+        item["border"] = min(max(float(body["border"]), 0), 24)
+    if "shadow" in body:
+        item["shadow"] = _clamp01(body["shadow"])
+    if "backdrop_blur" in body:
+        item["backdrop_blur"] = min(max(float(body["backdrop_blur"]), 0), 64)
+    if "enter" in body:
+        item["enter"] = min(max(float(body["enter"]), 0), 3)
+    if "exit" in body:
+        item["exit"] = min(max(float(body["exit"]), 0), 3)
+    if "layer_index" in body:
+        item["layer_index"] = int(body["layer_index"])
+    if "border_color" in body:
+        color = str(body["border_color"])
+        if len(color) == 7 and color.startswith("#"):
+            item["border_color"] = color
     if "animation" in body:
         item["animation"] = str(body["animation"])
+    if "exit_animation" in body:
+        value = str(body["exit_animation"] or "none")
+        if value not in {"none", "pop", "fade", "slide"}:
+            raise DogSCError("不支持的贴图退场动画。")
+        item["exit_animation"] = value
+
+
+def _delete_one_clip(project: dict, clip_id: str) -> None:
+    removed = next((clip for clip in project["clips"] if clip["id"] == clip_id), None)
+    if removed is not None:
+        bag = {
+            "clip": removed,
+            "zooms": [zoom for zoom in project["zooms"] if zoom.get("clip_id") == clip_id],
+            "markers": [marker for marker in project["markers"] if marker.get("clip_id") == clip_id],
+            "index": next((index for index, clip in enumerate(project["clips"]) if clip["id"] == clip_id), len(project["clips"])),
+        }
+        deleted = list(project.get("deleted_clips") or [])
+        deleted.append(bag)
+        project["deleted_clips"] = deleted[-20:]
+    project["clips"], project["zooms"], project["markers"] = delete_clip(
+        project["clips"], project["zooms"], project["markers"], clip_id
+    )
 
 
 def _update_item(items: list[dict], body: dict, apply) -> None:
@@ -851,36 +1011,62 @@ def _ffmpeg_failure(completed: subprocess.CompletedProcess[str]) -> str:
     return lines[-1] if lines else "导出失败"
 
 
-def _start_export(project: dict) -> dict:
+def _start_export(project: dict, body: dict | None = None) -> dict:
     project_id = project["id"]
+    body = body or {}
+    export = dict(project.get("export") or {})
+    if "kind" in body:
+        kind = str(body["kind"])
+        if kind not in {"video", "audio"}:
+            raise DogSCError("导出类型只支持 video 或 audio。")
+        export["kind"] = kind
+    if "scope" in body:
+        scope = str(body["scope"])
+        if scope not in {"full", "selection"}:
+            raise DogSCError("导出范围只支持 full 或 selection。")
+        export["scope"] = scope
+    if "range_start" in body or "range_end" in body:
+        start = max(float(body.get("range_start") or 0), 0)
+        end = max(float(body.get("range_end") or start + 0.05), start + 0.05)
+        export["range_start"] = start
+        export["range_end"] = end
+    if "selected_ids" in body and isinstance(body["selected_ids"], list):
+        export["selected_ids"] = [str(item) for item in body["selected_ids"] if str(item)]
+    kind = str(export.get("kind") or "video")
     with APP.lock:
         current = APP.exports.get(project_id)
         if current and current.get("state") == "running":
             return current
-        APP.exports[project_id] = {"state": "running"}
+        APP.exports[project_id] = {"state": "running", "kind": kind}
 
     def run() -> None:
         directory = project_dir(project_id)
-        output = directory / "export.mp4"
-        partial = directory / "export.partial.mp4"
+        suffix = "m4a" if kind == "audio" else "mp4"
+        output = directory / f"export.{suffix}"
+        partial = directory / f"export.partial.{suffix}"
         work = directory / "export-work"
         try:
-            command = build_export(load(project_id), media_path(project_id), load_pointer(project_id), partial, work)
+            snapshot = migrate(load(project_id))
+            snapshot["export"] = {**(snapshot.get("export") or {}), **export}
+            command = build_export(snapshot, media_path(project_id), load_pointer(project_id), partial, work)
             completed = subprocess.run(command, check=False, capture_output=True, text=True)
             if completed.returncode != 0 or not partial.is_file():
                 partial.unlink(missing_ok=True)
                 raise DogSCError(_ffmpeg_failure(completed))
             info = probe(partial)
-            if info["duration"] <= 0 or info["width"] <= 0:
+            if info["duration"] <= 0:
+                partial.unlink(missing_ok=True)
+                raise DogSCError("导出的文件无法播放。")
+            if kind == "video" and info["width"] <= 0:
                 partial.unlink(missing_ok=True)
                 raise DogSCError("导出的视频无法播放。")
             partial.replace(output)
-            APP.exports[project_id] = {"state": "done", "path": str(output)}
+            APP.exports[project_id] = {"state": "done", "path": str(output), "kind": kind}
         except Exception as error:
             APP.exports[project_id] = {"state": "error", "error": str(error)}
 
     threading.Thread(target=run, name="dogsc-export", daemon=True).start()
-    return {"state": "running"}
+    return {"state": "running", "kind": kind}
 
 
 def create_demo() -> dict:
