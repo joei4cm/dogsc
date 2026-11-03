@@ -6,6 +6,9 @@
 #include <QSGRendererInterface>
 #include <QSGSimpleTextureNode>
 
+#include <private/qquickwindow_p.h>
+#include <private/qsgplaintexture_p.h>
+
 PreviewSurfaceItem::PreviewSurfaceItem(QQuickItem *parent)
     : QQuickItem(parent)
 {
@@ -29,6 +32,12 @@ bool PreviewSurfaceItem::hasFrame() const
 {
     QMutexLocker lock(&m_mutex);
     return m_hasFrame;
+}
+
+bool PreviewSurfaceItem::hasNativeTexture() const
+{
+    QMutexLocker lock(&m_mutex);
+    return m_nativeHandle != 0;
 }
 
 QColor PreviewSurfaceItem::emptyColor() const
@@ -100,6 +109,7 @@ void PreviewSurfaceItem::presentFrame(const QImage &frame)
     {
         QMutexLocker lock(&m_mutex);
         m_frame = frame.convertToFormat(QImage::Format_RGBA8888);
+        m_nativeHandle = 0;
         m_frameDirty = true;
         m_hasFrame = true;
         m_status = QStringLiteral("frame");
@@ -119,6 +129,30 @@ void PreviewSurfaceItem::presentRgba(const QByteArray &rgba, int width, int heig
     QImage img(reinterpret_cast<const uchar *>(rgba.constData()),
                width, height, width * 4, QImage::Format_RGBA8888);
     presentFrame(img.copy());
+}
+
+void PreviewSurfaceItem::presentNativeTexture(qulonglong handle, int width, int height,
+                                              const QString &api)
+{
+    if (handle == 0 || width <= 0 || height <= 0) {
+        clearFrame();
+        return;
+    }
+    {
+        QMutexLocker lock(&m_mutex);
+        m_nativeHandle = handle;
+        m_nativeWidth = width;
+        m_nativeHeight = height;
+        m_nativeApi = api;
+        m_frame = QImage();
+        m_frameDirty = true;
+        m_hasFrame = true;
+        m_status = QStringLiteral("native-texture");
+    }
+    emit hasFrameChanged();
+    emit statusChanged();
+    refreshBackend();
+    update();
 }
 
 void PreviewSurfaceItem::presentMediaFrame(const QString &path, double seconds)
@@ -162,6 +196,7 @@ void PreviewSurfaceItem::clearFrame()
     {
         QMutexLocker lock(&m_mutex);
         m_frame = QImage();
+        m_nativeHandle = 0;
         m_frameDirty = true;
         m_hasFrame = false;
         m_status = QStringLiteral("empty");
@@ -180,17 +215,6 @@ void PreviewSurfaceItem::setStatus(const QString &status)
         m_status = status;
     }
     emit statusChanged();
-}
-
-void PreviewSurfaceItem::setHasFrame(bool has)
-{
-    {
-        QMutexLocker lock(&m_mutex);
-        if (m_hasFrame == has)
-            return;
-        m_hasFrame = has;
-    }
-    emit hasFrameChanged();
 }
 
 QImage PreviewSurfaceItem::makeEmptyStage(const QSize &size) const
@@ -230,7 +254,7 @@ QImage PreviewSurfaceItem::makeEmptyStage(const QSize &size) const
     sub.setPixelSize(qMax(10, px.height() / 28));
     sub.setWeight(QFont::Normal);
     p.setFont(sub);
-    const QString hint = QStringLiteral("QSG · %1 · G01/G02").arg(backend);
+    const QString hint = QStringLiteral("QSG/RHI · %1 · G01").arg(backend);
     const QFontMetrics sfm(sub);
     const int sx = (px.width() - sfm.horizontalAdvance(hint)) / 2;
     p.drawText(sx, ty + fm.height() + 10 + sfm.ascent(), hint);
@@ -258,26 +282,66 @@ QSGNode *PreviewSurfaceItem::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeDa
     bool dirty = false;
     bool has = false;
     QImage frame;
+    qulonglong native = 0;
+    int nw = 0, nh = 0;
     {
         QMutexLocker lock(&m_mutex);
         dirty = m_frameDirty;
         has = m_hasFrame;
         frame = m_frame;
+        native = m_nativeHandle;
+        nw = m_nativeWidth;
+        nh = m_nativeHeight;
     }
 
     if (dirty || !m_texture || m_texture->textureSize() != texSize) {
-        QImage source = (has && !frame.isNull())
-            ? frame.scaled(texSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
-            : makeEmptyStage(texSize);
-
         delete m_texture;
-        m_texture = window()->createTextureFromImage(source, QQuickWindow::TextureIsOpaque);
-        node->setTexture(m_texture);
-        {
-            QMutexLocker lock(&m_mutex);
-            m_frameDirty = false;
-            m_status = has ? QStringLiteral("frame-qsg") : QStringLiteral("empty-qsg");
+        m_texture = nullptr;
+
+        QQuickWindowPrivate *wd = QQuickWindowPrivate::get(window());
+        QRhi *rhi = wd ? wd->rhi : nullptr;
+
+        if (native != 0 && rhi && nw > 0 && nh > 0) {
+            // Zero-copy import path — wrap the caller's native GPU object.
+            auto *plain = new QSGPlainTexture();
+            plain->setTextureFromNativeTexture(
+                rhi, native, 0, 0, QSize(nw, nh),
+                QQuickWindow::TextureIsOpaque,
+                {});
+            plain->setOwnsTexture(true);
+            m_texture = plain;
+            {
+                QMutexLocker lock(&m_mutex);
+                m_status = QStringLiteral("native-rhi");
+                m_frameDirty = false;
+            }
+        } else {
+            QImage source = (has && !frame.isNull())
+                ? frame.scaled(texSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+                : makeEmptyStage(texSize);
+
+            if (rhi) {
+                // RHI-backed plain texture — Scene Graph uploads via QRhi.
+                auto *plain = QSGPlainTexture::fromImage(source);
+                plain->setOwnsTexture(true);
+                m_texture = plain;
+                {
+                    QMutexLocker lock(&m_mutex);
+                    m_status = has ? QStringLiteral("frame-rhi") : QStringLiteral("empty-rhi");
+                    m_frameDirty = false;
+                }
+            } else {
+                m_texture = window()->createTextureFromImage(
+                    source, QQuickWindow::TextureIsOpaque);
+                {
+                    QMutexLocker lock(&m_mutex);
+                    m_status = has ? QStringLiteral("frame-qsg") : QStringLiteral("empty-qsg");
+                    m_frameDirty = false;
+                }
+            }
         }
+
+        node->setTexture(m_texture);
         emit statusChanged();
         refreshBackend();
     }

@@ -6,7 +6,7 @@
 
 | ID | Gap | Apple | Linux 现状 | 更好的 Linux 实现 | 状态 |
 |---|---|---|---|---|---|
-| G01 | GPU 预览 | CIImage→CAMetalLayer，CADisplayLink | Web：`<video>`；**Qt6：`PreviewSurfaceItem` QSG 纹理，RHI backend 反射（Vulkan 优先）** | DMA-BUF / 外部 `QRhiTexture` 零拷贝 import | Web 否；Qt6 **已落地**（QSG+RHI；零拷贝 import 为增强项） |
+| G01 | GPU 预览 | CIImage→CAMetalLayer，CADisplayLink | Web：`<video>`；**Qt6：`PreviewSurfaceItem` QSGPlainTexture/QRhi（Vulkan 优先）+ `presentNativeTexture` 零拷贝导入缝** | 生产 DMA-BUF 导出器接线 | Web 否；Qt6 **已落地** |
 | G02 | 零容差 scrub | AVPlayer tolerance=0 | Web：Full ε≈0 settle；**Qt6：`presentMediaFrame` ffmpeg 解码→纹理** | 常驻解码器 + 时间码纹理缓存 | Web 部分；Qt6 **已落地**（解码→纹理路径） |
 | G03 | 浮动录制岛 | 独立 NSPanel + morph spring 0.5/0.82 | Web：idle↔live morph；**Qt6：frameless `RecorderIsland` + `IslandAnchor`（layer-shell / screen）** | 合成器专有扩展 | Web 部分；Qt6 **已落地** |
 | G04 | Continuous 圆角 | `cornerCurve = .continuous` | Web：CSS 圆形 radius；**Qt6：`ContinuousPanel` + SDF `ContinuousSdfPanel`** | — | Web 否；Qt6 **已落地** |
@@ -70,7 +70,7 @@
 | Ubuntu Wayland 采集 | **xdg-desktop-portal + PipeWire**（已有）/ GTK4+GStreamer | 门户契合度最高 |
 | 指针轨迹 | **libinput-evdev / X11**（已有）+ 未来 portal RD | 见 `linux/dogsc/pointer.py` |
 
-**结论：** Web Soft Silver 已收齐可复刻块（**G09–G52**，**G38 明示不可达终态**）。P0 Qt6 路径已落地：**G01** QSG+RHI 预览、**G02** ffmpeg 解码→纹理、**G03** frameless 岛 + layer-shell/screen 锚定、**G04** continuous SDF、**G06** libinput 指针流。增强项（DMA-BUF 零拷贝、portal 指针注入、常驻解码器缓存）不阻断 parity 收口。
+**结论：** Web Soft Silver 已收齐可复刻块（**G09–G52**，**G38 明示不可达终态**）。P0 Qt6 路径已落地：**G01** QSGPlainTexture/QRhi + `presentNativeTexture` 零拷贝导入、**G02** ffmpeg 解码→纹理、**G03** frameless 岛 + layer-shell/screen 锚定、**G04** continuous SDF、**G06** libinput 指针流。后续增强（生产 DMA-BUF 导出器、portal RD 指针注入、常驻解码器缓存）不阻断 parity 收口。
 
 ## Oil Pro 视觉复拍（本轮）
 

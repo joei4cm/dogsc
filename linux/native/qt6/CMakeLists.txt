@@ -81,11 +81,13 @@ add_custom_command(TARGET dogsc_soft_silver_host POST_BUILD
         $<TARGET_FILE_DIR:dogsc_soft_silver_host>/ContinuousSdfPanel.qml
 )
 
-# QPA native interface (wl_surface / wl_display) for layer-shell (G03).
+# Private Qt headers: QPA native interface (G03) + QSGPlainTexture / QRhi (G01).
 target_include_directories(dogsc_soft_silver_host PRIVATE
     ${Qt6Gui_INCLUDE_DIRS}
     ${Qt6Gui_PRIVATE_INCLUDE_DIRS}
+    ${Qt6Quick_PRIVATE_INCLUDE_DIRS}
     /usr/include/x86_64-linux-gnu/qt6/QtGui/${Qt6Gui_VERSION}
+    /usr/include/x86_64-linux-gnu/qt6/QtQuick/${Qt6Quick_VERSION}
 )
 target_link_libraries(dogsc_soft_silver_host PRIVATE Qt6::Gui Qt6::Quick)
 

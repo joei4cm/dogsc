@@ -9,10 +9,10 @@
 /**
  * Soft Silver stage preview plane (G01 / G02).
  *
- * Presents through QSGSimpleTextureNode so the active Scene Graph RHI backend
- * (Vulkan when QSG_RHI_BACKEND=vulkan) composites the texture. presentFrame /
- * presentRgba feed decoded pixels; presentMediaFrame decodes via ffmpeg —
- * the native decode→texture path that replaces HTML <video>.
+ * Presents through the Scene Graph. When the window's QRhi is live, frames go
+ * through QSGPlainTexture (RHI-backed, Vulkan when QSG_RHI_BACKEND=vulkan).
+ * presentNativeTexture() wraps an existing native GPU handle without a CPU
+ * round-trip — the zero-copy import seam for DMA-BUF / external exporters.
  */
 class PreviewSurfaceItem : public QQuickItem
 {
@@ -21,6 +21,7 @@ class PreviewSurfaceItem : public QQuickItem
     Q_PROPERTY(bool hasFrame READ hasFrame NOTIFY hasFrameChanged)
     Q_PROPERTY(QColor emptyColor READ emptyColor WRITE setEmptyColor NOTIFY emptyColorChanged)
     Q_PROPERTY(QString backend READ backend NOTIFY backendChanged)
+    Q_PROPERTY(bool nativeTexture READ hasNativeTexture NOTIFY hasFrameChanged)
 
 public:
     explicit PreviewSurfaceItem(QQuickItem *parent = nullptr);
@@ -28,6 +29,7 @@ public:
 
     QString status() const;
     bool hasFrame() const;
+    bool hasNativeTexture() const;
     QColor emptyColor() const;
     void setEmptyColor(const QColor &color);
     QString backend() const;
@@ -36,6 +38,12 @@ public slots:
     void presentFrame(const QImage &frame);
     void presentRgba(const QByteArray &rgba, int width, int height);
     void presentMediaFrame(const QString &path, double seconds);
+    /**
+     * Zero-copy import: wrap an existing native texture handle
+     * (GL name / VkImage as quint64) into the Scene Graph via QRhi.
+     */
+    void presentNativeTexture(qulonglong handle, int width, int height,
+                              const QString &api = QStringLiteral("auto"));
     void clearFrame();
     void refreshBackend();
 
@@ -51,7 +59,6 @@ protected:
 
 private:
     void setStatus(const QString &status);
-    void setHasFrame(bool has);
     QImage makeEmptyStage(const QSize &size) const;
 
     mutable QMutex m_mutex;
@@ -62,4 +69,9 @@ private:
     QColor m_emptyColor = QColor(0x11, 0x11, 0x11);
     QImage m_frame;
     QSGTexture *m_texture = nullptr;
+
+    qulonglong m_nativeHandle = 0;
+    int m_nativeWidth = 0;
+    int m_nativeHeight = 0;
+    QString m_nativeApi;
 };
