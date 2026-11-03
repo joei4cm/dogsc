@@ -7,9 +7,23 @@ This tree is the recommended native host for Soft Silver chrome parity with Appl
 
 | ID | Gap | Role here |
 |---|---|---|
-| **G01** | GPU preview (CIImage→CAMetalLayer) | `PreviewSurface.qml` → Vulkan `QQuickItem` |
-| **G03** | Floating recorder island (NSPanel + morph) | Capsule in `main.qml`; later frameless / layer-shell |
-| **G04** | Continuous corner curve | Large radii + future SDF squircle |
+| **G01** | GPU preview (CIImage→CAMetalLayer) | `PreviewSurfaceItem` → `QSGSimpleTextureNode`; seam for `QRhiTexture` / Vulkan |
+| **G03** | Floating recorder island (NSPanel + morph) | `RecorderIsland.qml` frameless `Tool` window + idle↔live morph |
+| **G04** | Continuous corner curve | `ContinuousCorner` / `ContinuousPanel` (smoothness 0.6 ≈ Apple continuous) |
+
+## Layout
+
+| File | Role |
+|---|---|
+| `main.cpp` / `CMakeLists.txt` | Qt Quick host; registers `DogSC` types; prefers `QSG_RHI_BACKEND=vulkan` |
+| `main.qml` | Soft Silver editor shell (stage dots, inspector, timeline, crop, export) |
+| `PreviewSurfaceItem.{h,cpp}` | C++ preview plane — empty-stage QSG texture + `presentFrame()` |
+| `PreviewSurface.qml` | QML wrapper around `DogSC.PreviewSurface` |
+| `ContinuousCorner.{h,cpp}` | Continuous path + A8 mask + `ContinuousPanel` painted item |
+| `RecorderIsland.qml` | Frameless always-on-top recorder capsule (NSPanel stand-in) |
+
+Tokens: bg `#ecedef`, panel `#fdfdfe`, platinum `#1f1f1f`. Springs: settle ~380ms
+OutCubic, morph ~500ms. No purple chrome.
 
 ## Relationship to other stacks
 
@@ -19,20 +33,36 @@ This tree is the recommended native host for Soft Silver chrome parity with Appl
   encode out). The Qt host owns chrome + GPU preview; it does not replace the
   sidecar for media I/O.
 
-## Layout of this skeleton
+## Build
 
-- `main.cpp` / `CMakeLists.txt` — Qt Quick host bootstrap
-- `main.qml` — Soft Silver shell stubs: stage dots, inspector rail (340–480),
-  timeline lanes (画面 / 运镜 / 马赛克), crop toolbar + overlay handles,
-  export sheet island, recorder capsule
-- `PreviewSurface.qml` — placeholder where the Vulkan QQuickItem plugs in
-
-Tokens: bg `#ecedef`, panel `#fdfdfe`, platinum `#1f1f1f`. Springs: settle ~380ms
-OutCubic, morph ~500ms. No purple chrome.
-
-## Build (when Qt6 is available)
+Ubuntu 24.04 packages:
 
 ```bash
-cmake -S . -B build -DCMAKE_PREFIX_PATH=/path/to/Qt6
-cmake --build build
+sudo apt-get install -y \
+  qt6-base-dev qt6-declarative-dev libstdc++-14-dev \
+  qml6-module-qtquick qml6-module-qtquick-controls \
+  qml6-module-qtquick-templates qml6-module-qtquick-layouts \
+  qml6-module-qtquick-window qml6-module-qtqml \
+  qml6-module-qtqml-workerscript qml6-module-qtqml-models
 ```
+
+```bash
+cmake -S linux/native/qt6 -B linux/native/qt6/build -DCMAKE_BUILD_TYPE=Release
+cmake --build linux/native/qt6/build -j
+./linux/native/qt6/build/dogsc_soft_silver_host
+```
+
+Headless smoke (software RHI + offscreen QPA):
+
+```bash
+./linux/native/qt6/smoke_build.sh
+```
+
+## Status (this slice)
+
+- **G01** — C++ `PreviewSurfaceItem` landed; CPU `presentFrame` + empty-stage QSG
+  texture. Zero-copy Vulkan import still open.
+- **G03** — Frameless floating `RecorderIsland` window with morph; Wayland
+  layer-shell anchoring still open.
+- **G04** — Continuous cubic path + `ContinuousPanel` chrome; SDF shader mask
+  still open.

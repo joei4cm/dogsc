@@ -1,12 +1,15 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import DogSC 1.0
 
 /**
  * Soft Silver shell skeleton for the recommended Linux host.
  * Springs mirror SpringMotion.settle (response 0.38, damping 1) and
- * RecorderMotion.morph (0.5 / 0.82). Preview should be a custom
- * QQuickItem backed by Vulkan/RHI — see PreviewSurface.qml.
+ * RecorderMotion.morph (0.5 / 0.82). Preview is C++ PreviewSurfaceItem
+ * (QSG texture → later Vulkan RHI). Floating recorder lives in
+ * RecorderIsland.qml (frameless Tool window). Continuous corners via
+ * ContinuousPanel (G04).
  */
 ApplicationWindow {
     id: root
@@ -153,8 +156,8 @@ ApplicationWindow {
                 opacity: 0.92
             }
 
-            // Canvas frame / preview placeholder — continuous ≈10 monitor on stage
-            Rectangle {
+            // Canvas frame / preview — ContinuousPanel ≈ monitor continuous 10
+            ContinuousPanel {
                 id: canvasFrame
                 width: Math.min(900, parent.width * 0.9)
                 height: width * 9 / 16
@@ -162,9 +165,10 @@ ApplicationWindow {
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.verticalCenterOffset: root.cropping ? -22 : -14
                 radius: 10
+                smoothness: 0.6
                 color: "#111111"
-                border.color: Qt.rgba(1, 1, 1, 0.06)
-                border.width: 0.5
+                borderColor: Qt.rgba(1, 1, 1, 0.06)
+                borderWidth: 0.5
                 clip: true
 
                 Behavior on anchors.verticalCenterOffset {
@@ -176,6 +180,7 @@ ApplicationWindow {
 
                 Loader {
                     anchors.fill: parent
+                    anchors.margins: 1
                     source: Qt.resolvedUrl("PreviewSurface.qml")
                 }
 
@@ -791,109 +796,8 @@ ApplicationWindow {
             }
         }
 
-        // Floating Soft Silver recorder capsule — idle↔live morph (G03 stub)
-        Rectangle {
-            id: capsule
-            anchors.horizontalCenter: parent.horizontalCenter
-            anchors.bottom: timeline.top
-            anchors.bottomMargin: 18
-            height: 56
-            width: root.recording ? 168 : (modeLabel.implicitWidth + 220)
-            radius: 28
-            color: root.panel
-            border.color: root.line
-            border.width: 0.5
-            z: 8
-            visible: !root.cropping && !root.exportOpen
-
-            Behavior on width {
-                NumberAnimation {
-                    duration: root.morphMs
-                    easing.type: Easing.OutCubic
-                }
-            }
-            Behavior on opacity {
-                NumberAnimation {
-                    duration: root.settleMs
-                    easing.type: Easing.OutCubic
-                }
-            }
-
-            // Soft island shadow plate under capsule
-            Rectangle {
-                anchors.fill: parent
-                anchors.margins: -2
-                radius: 30
-                color: "transparent"
-                border.width: 0
-                z: -1
-                opacity: 0.001
-            }
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.margins: 8
-                spacing: 0
-
-                Rectangle {
-                    id: modeWheel
-                    visible: !root.recording
-                    Layout.preferredHeight: 40
-                    Layout.preferredWidth: modeLabel.implicitWidth + 36
-                    radius: 20
-                    color: root.well
-                    Row {
-                        anchors.centerIn: parent
-                        spacing: 8
-                        Text {
-                            id: modeLabel
-                            text: qsTr("显示器")
-                            font.pixelSize: 13
-                            font.weight: Font.DemiBold
-                            color: root.platinum
-                        }
-                        Text { text: "⇅"; color: root.faint; font.pixelSize: 10 }
-                    }
-                }
-
-                Text {
-                    visible: root.recording
-                    text: "00:12.40"
-                    color: root.platinum
-                    font.pixelSize: 14
-                    font.weight: Font.DemiBold
-                    font.family: "ui-monospace"
-                    leftPadding: 8
-                }
-
-                Item { Layout.fillWidth: true }
-
-                Rectangle {
-                    width: 36; height: 36; radius: 18
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: "#ff6b63" }
-                        GradientStop { position: 1.0; color: "#ff453b" }
-                    }
-                    Rectangle {
-                        width: 12
-                        height: 12
-                        radius: root.recording ? 3 : 6
-                        anchors.centerIn: parent
-                        color: "white"
-                        Behavior on radius {
-                            NumberAnimation {
-                                duration: root.morphMs
-                                easing.type: Easing.OutCubic
-                            }
-                        }
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: root.recording = !root.recording
-                    }
-                }
-            }
-        }
+        // Floating Soft Silver recorder island — frameless Tool window (G03)
+        // Docked capsule removed; see RecorderIsland.qml (NSPanel stand-in).
 
         // —— Export sheet stub (modal island) ——
         Rectangle {
@@ -1077,5 +981,49 @@ ApplicationWindow {
                 }
             }
         }
+    }
+
+    // Frameless Soft Silver recorder island (G03) — separate Tool window
+    Loader {
+        id: recorderIslandLoader
+        active: true
+        source: Qt.resolvedUrl("RecorderIsland.qml")
+        asynchronous: false
+
+        function placeIsland() {
+            if (!item || !root.visible)
+                return
+            item.x = Math.round(root.x + (root.width - item.width) / 2)
+            item.y = Math.round(root.y + root.height - item.height - 36)
+        }
+
+        function syncIsland() {
+            if (!item)
+                return
+            item.islandVisible = root.visible && !root.cropping && !root.exportOpen
+            item.recording = root.recording
+            placeIsland()
+        }
+
+        onLoaded: {
+            syncIsland()
+            item.recordToggled.connect(function () {
+                root.recording = item.recording
+            })
+        }
+    }
+
+    onVisibleChanged: recorderIslandLoader.syncIsland()
+    onXChanged: recorderIslandLoader.placeIsland()
+    onYChanged: recorderIslandLoader.placeIsland()
+    onWidthChanged: recorderIslandLoader.placeIsland()
+    onHeightChanged: recorderIslandLoader.placeIsland()
+    onCroppingChanged: recorderIslandLoader.syncIsland()
+    onExportOpenChanged: recorderIslandLoader.syncIsland()
+    onRecordingChanged: {
+        if (recorderIslandLoader.item
+                && recorderIslandLoader.item.recording !== root.recording)
+            recorderIslandLoader.item.recording = root.recording
+        recorderIslandLoader.syncIsland()
     }
 }

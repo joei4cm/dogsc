@@ -1,0 +1,9 @@
+-rootPath
+/workspace/linux/native/qt6
+-cmake-output
+-output-file
+/workspace/linux/native/qt6/build/.qt_plugins/Qt6_QmlPlugins_Imports_dogsc_soft_silver_host.cmake
+-importPath
+/workspace/linux/native/qt6/build
+-importPath
+/usr/lib/x86_64-linux-gnu/qt6/qml

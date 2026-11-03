@@ -6,10 +6,10 @@
 
 | ID | Gap | Apple | Linux 现状 | 更好的 Linux 实现 | Web 现在？ |
 |---|---|---|---|---|---|
-| G01 | GPU 预览 | CIImage→CAMetalLayer，CADisplayLink | `<video>` + CSS transform | **Qt6 QQuickItem + Vulkan RHI**（或 Tauri+wgpu） | 否 → Qt6 |
+| G01 | GPU 预览 | CIImage→CAMetalLayer，CADisplayLink | Web：`<video>`；**Qt6：`PreviewSurfaceItem` QSG 纹理 + `presentFrame`** | 零拷贝 `QRhiTexture`/Vulkan import | Web 否；Qt6 **部分** |
 | G02 | 零容差 scrub | AVPlayer tolerance=0 | **加强**：Full ε≈0 settle + hover 虚线引导 + 时间徽章；Fast 粗 scrub；Alt 切割引导 | 原生解码纹理 | 部分 |
-| G03 | 浮动录制岛 | 独立 NSPanel + morph spring 0.5/0.82 | **加强**：idle↔live morph；Qt 无边框窗仍为最优 | Qt / Wayland layer-shell | 部分 |
-| G04 | Continuous 圆角 | `cornerCurve = .continuous` | CSS 圆形 radius | Qt SDF squircle / Skia | 否 → Qt6 |
+| G03 | 浮动录制岛 | 独立 NSPanel + morph spring 0.5/0.82 | Web：idle↔live morph；**Qt6：`RecorderIsland.qml` 无边框 Tool 窗 + morph** | Wayland layer-shell 锚点 | Web 部分；Qt6 **部分** |
+| G04 | Continuous 圆角 | `cornerCurve = .continuous` | Web：CSS 圆形 radius；**Qt6：`ContinuousPanel` smoothness 0.6** | SDF fragment mask | Web 否；Qt6 **部分** |
 | G06 | 指针流 | CGEvent | 仅 X11 PointerSampler | **libinput** / portal RD / 合成器 API | 否 |
 | G07 | Crop 草稿态 | 确认/取消/清除 + 八控点 | **已落地**：草稿 overlay、检查器、Esc 取消、导出 `canvas.crop` | GPU 预览仍依赖 G01 | **是** |
 
@@ -70,7 +70,7 @@
 | Ubuntu Wayland 采集 | **xdg-desktop-portal + PipeWire**（已有）/ GTK4+GStreamer | 门户契合度最高 |
 | 指针轨迹 | **libinput** / portal remote desktop | 浏览器拿不到 CGEvent 级流 |
 
-**结论：** Web Soft Silver 已收齐本轮可复刻块（**G09–G52**）。首页录制岛为舞台主角；编辑器 docked chrome。Web 桥侧开项已清零；iPhone Continuity、Metal 预览、真 continuous NSPanel 仍明示不在 Web 桥范围。P0 预览真相源 / continuous / 浮动录制窗最优解仍是 **Qt6-QML-Vulkan**。
+**结论：** Web Soft Silver 已收齐本轮可复刻块（**G09–G52**）。首页录制岛为舞台主角；编辑器 docked chrome。Web 桥侧开项已清零；iPhone Continuity、Metal 预览、真 continuous NSPanel 仍明示不在 Web 桥范围。P0 最优解 **Qt6-QML-Vulkan** 已起骨架：`linux/native/qt6` 含 `PreviewSurfaceItem`（G01）、frameless `RecorderIsland`（G03）、`ContinuousPanel`（G04）；零拷贝 Vulkan import / layer-shell / SDF mask 仍开。
 
 ## Oil Pro 视觉复拍（本轮）
 

@@ -1,44 +1,36 @@
 import QtQuick
+import DogSC 1.0
 
 /**
- * Preview surface stub — Soft Silver stage content plane.
+ * Soft Silver stage content plane.
  *
- * Graduation target (G01): replace this Rectangle with a C++ QQuickItem that
- * presents frames via Qt RHI / Vulkan (QRhiTexture → QSGTextureNode, or a
- * custom QSGRenderNode). Do not embed an HTML <video> or Qt Multimedia
- * VideoOutput as the long-term path; those cannot match Apple's
- * CIImage → CAMetalLayer zero-copy preview.
- *
- * Plug-in sketch:
- *   1. class PreviewSurfaceItem : public QQuickItem
- *   2. override updatePaintNode() to upload decoded / GPU frames
- *   3. qmlRegisterType<PreviewSurfaceItem>("DogSC", 1, 0, "PreviewSurface")
- *   4. swap this file's root for the registered type (same id / anchors API)
+ * Backed by C++ PreviewSurfaceItem (QSGSimpleTextureNode). Empty stage paints a
+ * Soft Silver placeholder; presentFrame() uploads CPU frames today and is the
+ * seam for later QRhiTexture / Vulkan zero-copy imports (G01).
  *
  * Capture / export remain the Python ffmpeg sidecar — this item is display only.
  */
-Rectangle {
+PreviewSurface {
     id: previewSurface
-    color: "#111111"
-    radius: 14
-    clip: true
+    emptyColor: "#111111"
 
-    // Soft Silver empty-stage placeholder until Vulkan QQuickItem lands.
-    Column {
-        anchors.centerIn: parent
-        spacing: 8
+    // Status chip for host debugging (hidden once a real frame is present)
+    Rectangle {
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.margins: 8
+        width: statusLabel.implicitWidth + 14
+        height: 22
+        radius: 7
+        color: Qt.rgba(0, 0, 0, 0.45)
+        visible: !previewSurface.hasFrame
         Text {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: qsTr("PreviewSurface")
+            id: statusLabel
+            anchors.centerIn: parent
+            text: previewSurface.status
             color: "#fdfdfe"
-            font.pixelSize: 14
-            font.weight: Font.DemiBold
-        }
-        Text {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: qsTr("Vulkan QQuickItem · G01")
-            color: Qt.rgba(1, 1, 1, 0.45)
-            font.pixelSize: 11
+            font.pixelSize: 10
+            font.weight: Font.Medium
         }
     }
 }
