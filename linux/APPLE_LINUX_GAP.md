@@ -1,17 +1,17 @@
 # Apple Soft Silver ↔ Linux：像素 / 功能 Gap 与更优实现
 
-对照基线：`Sources/DogSCApp/*` Soft Silver 原版 vs `linux/dogsc/web-*` Soft Silver 桥。
+对照基线：`Sources/DogSCApp/*` Soft Silver 原版 vs `linux/dogsc/web-*` Soft Silver 桥 + `linux/native/qt6`。
 
 ## P0（体验或预览真相源）
 
-| ID | Gap | Apple | Linux 现状 | 更好的 Linux 实现 | Web 现在？ |
+| ID | Gap | Apple | Linux 现状 | 更好的 Linux 实现 | 状态 |
 |---|---|---|---|---|---|
-| G01 | GPU 预览 | CIImage→CAMetalLayer，CADisplayLink | `<video>` + CSS transform | **Qt6 QQuickItem + Vulkan RHI**（或 Tauri+wgpu） | 否 → Qt6 |
-| G02 | 零容差 scrub | AVPlayer tolerance=0 | **加强**：Full ε≈0 settle + hover 虚线引导 + 时间徽章；Fast 粗 scrub；Alt 切割引导 | 原生解码纹理 | 部分 |
-| G03 | 浮动录制岛 | 独立 NSPanel + morph spring 0.5/0.82 | **加强**：idle↔live morph；Qt 无边框窗仍为最优 | Qt / Wayland layer-shell | 部分 |
-| G04 | Continuous 圆角 | `cornerCurve = .continuous` | CSS 圆形 radius | Qt SDF squircle / Skia | 否 → Qt6 |
-| G06 | 指针流 | CGEvent | 仅 X11 PointerSampler | **libinput** / portal RD / 合成器 API | 否 |
-| G07 | Crop 草稿态 | 确认/取消/清除 + 八控点 | **已落地**：草稿 overlay、检查器、Esc 取消、导出 `canvas.crop` | GPU 预览仍依赖 G01 | **是** |
+| G01 | GPU 预览 | CIImage→CAMetalLayer，CADisplayLink | Web：`<video>`；**Qt6：`PreviewSurfaceItem` QSGPlainTexture/QRhi（Vulkan 优先）+ `presentNativeTexture` 零拷贝导入缝** | 生产 DMA-BUF 导出器接线 | Web 否；Qt6 **已落地** |
+| G02 | 零容差 scrub | AVPlayer tolerance=0 | Web：Full ε≈0 settle；**Qt6：`presentMediaFrame` ffmpeg 解码→纹理** | 常驻解码器 + 时间码纹理缓存 | Web 部分；Qt6 **已落地**（解码→纹理路径） |
+| G03 | 浮动录制岛 | 独立 NSPanel + morph spring 0.5/0.82 | Web：idle↔live morph；**Qt6：frameless `RecorderIsland` + `IslandAnchor`（layer-shell / screen）** | 合成器专有扩展 | Web 部分；Qt6 **已落地** |
+| G04 | Continuous 圆角 | `cornerCurve = .continuous` | Web：CSS 圆形 radius；**Qt6：`ContinuousPanel` + SDF `ContinuousSdfPanel`** | — | Web 否；Qt6 **已落地** |
+| G06 | 指针流 | CGEvent | **`dogsc.pointer`：libinput-evdev 优先，X11 回退**；recorder 已接线 | portal RD 指针注入 | **已落地** |
+| G07 | Crop 草稿态 | 确认/取消/清除 + 八控点 | **已落地**：草稿 overlay、检查器、Esc 取消、导出 `canvas.crop` | GPU 预览跟 G01 | **是** |
 
 ## P1（可在 Web Soft Silver 落地）
 
@@ -45,7 +45,7 @@
 | G35 | 逐帧 / 跳秒 / 片段换序 | ←→ ⇧ , . [ ] | **已落地** |
 | G36 | 摄像头主源 / 录屏 PiP 副轨 | AVCapture + Continuity Camera | **已落地** V4L2 枚举 + ffmpeg 主源/sidecar → `camera.mp4`；导出滤镜叠画中画 |
 | G37 | Android 手机屏幕 | （mac 无） | **已落地** scrcpy 优先 / adb screenrecord 回退 |
-| G38 | iPhone 有线屏幕 | Continuity / CMIO screen devices | **明示限制**：Linux 无 Continuity；UVC 出现时走摄像头；idevice 仅枚举提示 |
+| G38 | iPhone 有线屏幕 | Continuity / CMIO screen devices | **终态 / 明示不可达**：Linux 无 Continuity Camera；UVC 出现时走摄像头；idevice 仅枚举提示。不作为开项。 |
 | G39 | 录制倒计时 | Soft Silver countdown orb | **已落地** Off/3s/5s + 大号 orb |
 | G40 | 录制丢弃 / 停录决策 | discard + save&edit sheet | **已落地** live 丢弃 API + 停录决策岛 |
 | G41 | 标记列表面板 | Marker list seek/rename/delete | **已落地** 时间线 chip + 面板 |
@@ -65,12 +65,12 @@
 
 | 需求（Apple） | 更优 Linux 栈 | 说明 |
 |---|---|---|
-| Soft Silver + 真 spring morph | **Qt 6 QML + Vulkan RHI**（parity 推荐） | 连续胶囊、原生窗、GPU 预览；见 `linux/native/qt6` |
+| Soft Silver + 真 spring morph | **Qt 6 QML + Vulkan RHI**（parity 推荐） | 见 `linux/native/qt6`：PreviewSurface / RecorderIsland / ContinuousSdf / IslandAnchor |
 | 快速复用现有 Soft Silver CSS | **Tauri 2 + wgpu** | 留 web chrome，换预览表面 |
 | Ubuntu Wayland 采集 | **xdg-desktop-portal + PipeWire**（已有）/ GTK4+GStreamer | 门户契合度最高 |
-| 指针轨迹 | **libinput** / portal remote desktop | 浏览器拿不到 CGEvent 级流 |
+| 指针轨迹 | **libinput-evdev / X11**（已有）+ 未来 portal RD | 见 `linux/dogsc/pointer.py` |
 
-**结论：** Web Soft Silver 已收齐本轮可复刻块（**G09–G52**）。首页录制岛为舞台主角；编辑器 docked chrome。Web 桥侧开项已清零；iPhone Continuity、Metal 预览、真 continuous NSPanel 仍明示不在 Web 桥范围。P0 预览真相源 / continuous / 浮动录制窗最优解仍是 **Qt6-QML-Vulkan**。
+**结论：** Web Soft Silver 已收齐可复刻块（**G09–G52**，**G38 明示不可达终态**）。P0 Qt6 路径已落地：**G01** QSGPlainTexture/QRhi + `presentNativeTexture` 零拷贝导入、**G02** ffmpeg 解码→纹理、**G03** frameless 岛 + layer-shell/screen 锚定、**G04** continuous SDF、**G06** libinput 指针流。后续增强（生产 DMA-BUF 导出器、portal RD 指针注入、常驻解码器缓存）不阻断 parity 收口。
 
 ## Oil Pro 视觉复拍（本轮）
 
@@ -78,8 +78,4 @@
 |---|---|
 | 首页（录制岛 hero） | `.oil-ui/soft-silver-gap/hero-home/` |
 | 编辑器（docked chrome） | `.oil-ui/soft-silver-gap/hero-editor/` |
-| Apple parity 基线 | `.oil-ui/apple-parity/` |
-| 倒计时 / 标记 / 焦点虚化 | `.oil-ui/apple-parity-polish/` |
 | 开场顺序 / 导出选区 / QW | `.oil-ui/apple-parity-polish/{opening-order,export-scope,shortcuts-qw}/` |
-| 场景预设 | `.oil-ui/apple-parity-polish/scene-presets/` |
-| 诊断 | `.oil-ui/apple-parity-polish/diagnosis.md` |

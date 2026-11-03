@@ -695,5 +695,35 @@ class AppleParityBatchTests(unittest.TestCase):
         self.assertEqual(label, "focus0")
 
 
+class PointerSamplerTests(unittest.TestCase):
+    def test_make_pointer_sampler_prefers_explicit_libinput_or_x11(self):
+        from dogsc.pointer import LibinputPointerSampler, make_pointer_sampler
+
+        geometry = {"x": 0, "y": 0, "width": 1920, "height": 1080}
+        if LibinputPointerSampler.available():
+            sampler = make_pointer_sampler(None, geometry, backend="libinput")
+            self.assertIsInstance(sampler, LibinputPointerSampler)
+            self.assertEqual(sampler.backend, "libinput-evdev")
+            sampler.stop()
+        elif os.environ.get("DISPLAY"):
+            from dogsc.x11 import PointerSampler
+            sampler = make_pointer_sampler(os.environ.get("DISPLAY"), geometry, backend="x11")
+            self.assertIsInstance(sampler, PointerSampler)
+            sampler.stop()
+        else:
+            self.skipTest("no readable /dev/input and no DISPLAY")
+
+    def test_libinput_sampler_start_stop_without_crash(self):
+        from dogsc.pointer import LibinputPointerSampler
+
+        if not LibinputPointerSampler.available():
+            self.skipTest("no readable /dev/input/event*")
+        sampler = LibinputPointerSampler({"x": 0, "y": 0, "width": 100, "height": 100})
+        sampler.start()
+        time.sleep(0.05)
+        events = sampler.stop()
+        self.assertIsInstance(events, list)
+
+
 if __name__ == "__main__":
     unittest.main()

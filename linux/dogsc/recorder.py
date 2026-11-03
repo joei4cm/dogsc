@@ -34,7 +34,7 @@ from dogsc.sources import (
     portal_gstreamer_command,
     x11_record_command,
 )
-from dogsc.x11 import PointerSampler
+from dogsc.pointer import make_pointer_sampler
 from dogsc.zoom import new_id
 
 
@@ -135,9 +135,16 @@ class Recorder:
                 except OSError:
                     camera_proc = None
             sampler = None
-            if not cursor_baked and geometry is not None and backend == "x11":
-                sampler = PointerSampler(os.environ.get("DISPLAY"), geometry)
-                sampler.start()
+            if not cursor_baked and geometry is not None:
+                # G06: libinput-evdev when readable, else X11 — works for
+                # portal/Wayland sessions that still expose /dev/input.
+                try:
+                    sampler = make_pointer_sampler(
+                        os.environ.get("DISPLAY"), geometry, backend=backend
+                    )
+                    sampler.start()
+                except Exception:
+                    sampler = None
             self._video = video
             self._audio = audio_proc
             self._camera = camera_proc
