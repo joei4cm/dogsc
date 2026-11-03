@@ -5,7 +5,7 @@ P0 graduation path for DogSC on Linux: **Qt 6 QML + Vulkan RHI**.
 | ID | Gap | Status here |
 |---|---|---|
 | **G01** | GPU preview | `PreviewSurfaceItem` QSG texture; RHI backend reflected (`vulkan` preferred) |
-| **G02** | Native decode→texture | `presentMediaFrame` / `presentRgba` / `presentFrame` |
+| **G02** | Native decode→texture / scrub | `FrameCache` LRU + `HostBridge` sidecar thumbs + `presentMediaFrame` |
 | **G03** | Floating recorder island | `RecorderIsland.qml` + `IslandAnchor` (`layer-shell` / `screen`) |
 | **G04** | Continuous corners | `ContinuousPanel` + SDF `ContinuousSdfPanel` (qsb) |
 
@@ -18,6 +18,8 @@ P0 graduation path for DogSC on Linux: **Qt 6 QML + Vulkan RHI**.
 | `PreviewSurfaceItem.*` | QSG preview plane + ffmpeg decode→texture |
 | `ContinuousCorner.*` / `ContinuousSdfPanel.qml` | Continuous path + GPU SDF fill |
 | `IslandAnchor.*` / `RecorderIsland.qml` | Frameless island + Wayland layer-shell / screen anchor |
+| `FrameCache.*` | Resident decode LRU for playhead scrub |
+| `HostBridge.*` | HTTP client for Python sidecar (`:47321`) projects + thumbs |
 | `shaders/continuous_corner.*` | SDF vertex/fragment sources |
 | `protocols/wlr-layer-shell-unstable-v1.xml` | Vendored layer-shell protocol |
 

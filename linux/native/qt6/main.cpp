@@ -1,4 +1,6 @@
 #include "ContinuousCorner.h"
+#include "FrameCache.h"
+#include "HostBridge.h"
 #include "IslandAnchor.h"
 #include "PreviewSurfaceItem.h"
 
@@ -36,6 +38,8 @@ int main(int argc, char *argv[])
     qmlRegisterType<PreviewSurfaceItem>("DogSC", 1, 0, "PreviewSurface");
     qmlRegisterType<ContinuousPanelItem>("DogSC", 1, 0, "ContinuousPanel");
     qmlRegisterType<IslandAnchor>("DogSC", 1, 0, "IslandAnchor");
+    qmlRegisterType<FrameCache>("DogSC", 1, 0, "FrameCache");
+    qmlRegisterType<HostBridge>("DogSC", 1, 0, "HostBridge");
     qmlRegisterSingletonType<ContinuousCorner>(
         "DogSC", 1, 0, "ContinuousCorner", continuousCornerProvider);
 
