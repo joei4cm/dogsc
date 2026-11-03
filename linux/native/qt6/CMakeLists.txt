@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.21)
-project(dogsc_soft_silver_host VERSION 0.3 LANGUAGES CXX C)
+project(dogsc_soft_silver_host VERSION 0.4 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Gui Quick ShaderTools)
+find_package(Qt6 REQUIRED COMPONENTS Gui Quick Network Concurrent ShaderTools)
 find_package(PkgConfig)
 pkg_check_modules(WAYLAND_CLIENT IMPORTED_TARGET wayland-client)
 
@@ -17,6 +17,10 @@ qt_add_executable(dogsc_soft_silver_host
     ContinuousCorner.h
     IslandAnchor.cpp
     IslandAnchor.h
+    FrameCache.cpp
+    FrameCache.h
+    HostBridge.cpp
+    HostBridge.h
 )
 
 # Bake Soft Silver continuous-corner SDF shaders (G04).
@@ -89,7 +93,8 @@ target_include_directories(dogsc_soft_silver_host PRIVATE
     /usr/include/x86_64-linux-gnu/qt6/QtGui/${Qt6Gui_VERSION}
     /usr/include/x86_64-linux-gnu/qt6/QtQuick/${Qt6Quick_VERSION}
 )
-target_link_libraries(dogsc_soft_silver_host PRIVATE Qt6::Gui Qt6::Quick)
+target_link_libraries(dogsc_soft_silver_host PRIVATE
+    Qt6::Gui Qt6::Quick Qt6::Network Qt6::Concurrent)
 
 install(TARGETS dogsc_soft_silver_host RUNTIME DESTINATION bin)
 install(FILES ${_dogsc_qml_files} DESTINATION share/dogsc/qt6)

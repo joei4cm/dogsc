@@ -35,6 +35,36 @@ ApplicationWindow {
     property bool recording: false
     property int inspectorTab: 0
     property int timelineLane: 0
+    property real playhead: 0
+    property real mediaDuration: Math.max(hostBridge.duration, frameCache.duration)
+
+    // Sidecar bridge + resident frame cache (G02 scrub enhancement)
+    HostBridge {
+        id: hostBridge
+        Component.onCompleted: refresh()
+        onThumbReady: function (image, seconds) {
+            if (previewLoader.item)
+                previewLoader.item.presentFrame(image)
+            if (Math.abs(seconds - root.playhead) < 0.05)
+                root.playhead = seconds
+        }
+        onProjectChanged: {
+            if (mediaPath)
+                frameCache.mediaPath = mediaPath
+        }
+        onError: function (message) {
+            console.log("HostBridge:", message)
+        }
+    }
+    FrameCache {
+        id: frameCache
+        capacity: 64
+        fps: 30
+        onFrameReady: function (image, seconds) {
+            if (previewLoader.item)
+                previewLoader.item.presentFrame(image)
+        }
+    }
 
     // Soft Silver stage + docked chrome (hairline, not floating dashboard islands)
     Item {
@@ -179,6 +209,7 @@ ApplicationWindow {
                 }
 
                 Loader {
+                    id: previewLoader
                     anchors.fill: parent
                     anchors.margins: 1
                     source: Qt.resolvedUrl("PreviewSurface.qml")
@@ -591,7 +622,9 @@ ApplicationWindow {
                     }
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        text: qsTr("磁吸 · 悬停")
+                        text: hostBridge.connected
+                              ? (hostBridge.projectName || qsTr("已连接"))
+                              : qsTr("sidecar · 未连接")
                         color: root.faint
                         font.pixelSize: 11
                     }
@@ -666,10 +699,37 @@ ApplicationWindow {
             }
 
             // Playhead line + capsule knob (NativeTimelinePlayheadView)
+            // Scrub surface — drives HostBridge thumb + FrameCache decode
+            MouseArea {
+                id: scrubArea
+                anchors.top: timelineBar.bottom
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                function scrubAt(mx) {
+                    const dur = Math.max(root.mediaDuration, 0.001)
+                    const t = Math.max(0, Math.min(1, mx / Math.max(width, 1))) * dur
+                    root.playhead = t
+                    hostBridge.playhead = t
+                    if (frameCache.mediaPath)
+                        frameCache.playhead = t
+                }
+                onPressed: function (mouse) { scrubAt(mouse.x) }
+                onPositionChanged: function (mouse) {
+                    if (pressed)
+                        scrubAt(mouse.x)
+                }
+            }
+
             Item {
+                id: playheadItem
                 anchors.top: timelineBar.bottom
                 anchors.bottom: parent.bottom
-                x: parent.width * 0.28
+                x: root.mediaDuration > 0
+                   ? (root.playhead / root.mediaDuration) * parent.width
+                   : parent.width * 0.08
                 width: 2
                 z: 5
                 Rectangle {
@@ -692,9 +752,10 @@ ApplicationWindow {
             Item {
                 anchors.top: timelineBar.bottom
                 anchors.bottom: parent.bottom
-                x: parent.width * 0.41
+                x: playheadItem.x + 18
                 width: 1
                 z: 4
+                visible: scrubArea.containsMouse || scrubArea.pressed
                 Rectangle {
                     anchors.top: parent.top
                     anchors.topMargin: 18
@@ -717,22 +778,21 @@ ApplicationWindow {
                     border.width: 0.75
                     Text {
                         anchors.centerIn: parent
-                        text: "0:04.20"
+                        text: {
+                            const t = root.playhead
+                            const m = Math.floor(t / 60)
+                            const s = Math.floor(t % 60)
+                            const cs = Math.floor((t % 1) * 100)
+                            const ss = (s < 10 ? "0" : "") + s
+                            const cc = (cs < 10 ? "0" : "") + cs
+                            return m + ":" + ss + "." + cc
+                        }
                         color: "#fdfdfe"
                         font.pixelSize: 9
                         font.weight: Font.Medium
                         font.family: "ui-monospace"
                     }
                 }
-            }
-            Rectangle {
-                anchors.top: timelineBar.bottom
-                anchors.bottom: parent.bottom
-                x: parent.width * 0.55
-                width: 1
-                color: "#f2ad47"
-                opacity: 0.7
-                z: 2
             }
         }
 
