@@ -1,0 +1,24 @@
+[
+  {
+    "file": "page.png",
+    "state": null,
+    "size": "1440x900",
+    "zoom": 1,
+    "animationWaitMs": 585,
+    "issues": [
+      "第 4 步「click #add-edit-marker」：中心点被 html 挡住，动作仍照常执行"
+    ],
+    "lint": []
+  },
+  {
+    "file": "page-marked.png",
+    "state": null,
+    "size": "1440x900",
+    "zoom": 1,
+    "failed": true,
+    "issues": [
+      "第 4 步「click #add-edit-marker」：中心点被 html 挡住，动作仍照常执行",
+      "--mark：找不到元素 .marker；线索：去掉最后一段后 \"（空）\" 匹配 0 个元素；例如 click .open"
+    ]
+  }
+]
