@@ -4,17 +4,15 @@ import DogSC 1.0
 /**
  * Soft Silver stage content plane.
  *
- * Backed by C++ PreviewSurfaceItem (QSGSimpleTextureNode). Empty stage paints a
- * Soft Silver placeholder; presentFrame() uploads CPU frames today and is the
- * seam for later QRhiTexture / Vulkan zero-copy imports (G01).
- *
- * Capture / export remain the Python ffmpeg sidecar — this item is display only.
+ * Backed by C++ PreviewSurfaceItem (QSG texture composited by the active RHI
+ * backend). presentFrame / presentRgba / presentMediaFrame feed the native
+ * decode→texture path (G01 / G02).
  */
 PreviewSurface {
     id: previewSurface
     emptyColor: "#111111"
+    Component.onCompleted: refreshBackend()
 
-    // Status chip for host debugging (hidden once a real frame is present)
     Rectangle {
         anchors.left: parent.left
         anchors.top: parent.top
@@ -27,7 +25,7 @@ PreviewSurface {
         Text {
             id: statusLabel
             anchors.centerIn: parent
-            text: previewSurface.status
+            text: previewSurface.status + " · " + previewSurface.backend
             color: "#fdfdfe"
             font.pixelSize: 10
             font.weight: Font.Medium

@@ -11,8 +11,8 @@
  *
  * Path generation uses a Figma/iOS-style smooth-corner cubic approximation
  * (smoothness 0.6 ≈ system continuous). Raster masks are A8 coverage suitable
- * for OpacityMask / Scene Graph clipping. SDF fragment shading is the next
- * Vulkan step — this lands the geometry + mask contract first.
+ * for OpacityMask / Scene Graph clipping. GPU SDF fill lives in
+ * ContinuousSdfPanel.qml + shaders/continuous_corner.*.
  */
 class ContinuousCorner : public QObject
 {
