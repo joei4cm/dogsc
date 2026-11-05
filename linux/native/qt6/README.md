@@ -18,8 +18,8 @@ P0 graduation path for DogSC on Linux: **Qt 6 QML + Vulkan RHI**.
 | `PreviewSurfaceItem.*` | QSG preview plane + ffmpeg decode→texture |
 | `ContinuousCorner.*` / `ContinuousSdfPanel.qml` | Continuous path + GPU SDF fill |
 | `IslandAnchor.*` / `RecorderIsland.qml` | Frameless island + Wayland layer-shell / screen anchor |
-| `FrameCache.*` | Resident decode LRU for playhead scrub |
-| `HostBridge.*` | HTTP client for Python sidecar (`:47321`) projects + thumbs |
+| `FrameCache.*` / `DecodePool.*` | Resident decode LRU + warm worker pool for scrub |
+| `HostBridge.*` | HTTP client for sidecar projects/thumbs/record |
 | `shaders/continuous_corner.*` | SDF vertex/fragment sources |
 | `protocols/wlr-layer-shell-unstable-v1.xml` | Vendored layer-shell protocol |
 

@@ -1069,6 +1069,10 @@ ApplicationWindow {
             syncIsland()
             item.recordToggled.connect(function () {
                 root.recording = item.recording
+                if (item.recording)
+                    hostBridge.startRecord()
+                else
+                    hostBridge.stopRecord()
             })
         }
     }

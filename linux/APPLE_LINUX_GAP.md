@@ -7,10 +7,10 @@
 | ID | Gap | Apple | Linux 现状 | 更好的 Linux 实现 | 状态 |
 |---|---|---|---|---|---|
 | G01 | GPU 预览 | CIImage→CAMetalLayer，CADisplayLink | Web：`<video>`；**Qt6：`PreviewSurfaceItem` QSGPlainTexture/QRhi（Vulkan 优先）+ `presentNativeTexture` 零拷贝导入缝** | 生产 DMA-BUF 导出器接线 | Web 否；Qt6 **已落地** |
-| G02 | 零容差 scrub | AVPlayer tolerance=0 | Web：Full ε≈0 settle；**Qt6：`FrameCache` LRU + `HostBridge` thumb/sidecar scrub** | 常驻 demuxer 进程池 | Web 部分；Qt6 **已落地** |
+| G02 | 零容差 scrub | AVPlayer tolerance=0 | Web：Full ε≈0 settle；**Qt6：`FrameCache` + `DecodePool` 常驻 worker + `HostBridge` scrub** | 常驻 demuxer 进程内 seek | Web 部分；Qt6 **已落地** |
 | G03 | 浮动录制岛 | 独立 NSPanel + morph spring 0.5/0.82 | Web：idle↔live morph；**Qt6：frameless `RecorderIsland` + `IslandAnchor`（layer-shell / screen）** | 合成器专有扩展 | Web 部分；Qt6 **已落地** |
 | G04 | Continuous 圆角 | `cornerCurve = .continuous` | Web：CSS 圆形 radius；**Qt6：`ContinuousPanel` + SDF `ContinuousSdfPanel`** | — | Web 否；Qt6 **已落地** |
-| G06 | 指针流 | CGEvent | **`dogsc.pointer`：libinput-evdev 优先，X11 回退**；recorder 已接线 | portal RD 指针注入 | **已落地** |
+| G06 | 指针流 | CGEvent | **`dogsc.pointer`：libinput → X11 → portal RD**；`portal_pointer` 会话已接线 | EIS/libei 事件流 | **已落地** |
 | G07 | Crop 草稿态 | 确认/取消/清除 + 八控点 | **已落地**：草稿 overlay、检查器、Esc 取消、导出 `canvas.crop` | GPU 预览跟 G01 | **是** |
 
 ## P1（可在 Web Soft Silver 落地）
@@ -70,7 +70,7 @@
 | Ubuntu Wayland 采集 | **xdg-desktop-portal + PipeWire**（已有）/ GTK4+GStreamer | 门户契合度最高 |
 | 指针轨迹 | **libinput-evdev / X11**（已有）+ 未来 portal RD | 见 `linux/dogsc/pointer.py` |
 
-**结论：** Web Soft Silver 已收齐可复刻块（**G09–G52**，**G38 明示不可达终态**）。P0 Qt6 路径已落地：**G01** QSGPlainTexture/QRhi + `presentNativeTexture`、**G02** `FrameCache`/`HostBridge` scrub、**G03** frameless 岛 + layer-shell、**G04** continuous SDF、**G06** libinput 指针流。后续增强（生产 DMA-BUF 导出器、portal RD 指针注入、常驻 demuxer 池）不阻断 parity 收口。
+**结论：** Web Soft Silver 已收齐可复刻块（**G09–G52**，**G38 明示不可达终态**）。P0 Qt6 路径已落地：**G01** QSGPlainTexture/QRhi + `presentNativeTexture`、**G02** `FrameCache`/`DecodePool`/`HostBridge` scrub、**G03** frameless 岛 + layer-shell、**G04** continuous SDF、**G06** libinput/X11/portal-RD 指针流。后续增强（生产 DMA-BUF 导出器、EIS 事件流、进程内 demuxer seek）不阻断 parity 收口。
 
 ## Oil Pro 视觉复拍（本轮）
 

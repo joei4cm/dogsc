@@ -5,13 +5,14 @@
 #include <QObject>
 #include <QUrl>
 #include <QVariantList>
+#include <QVariantMap>
 #include <functional>
 
 /**
  * Soft Silver Qt host ↔ Python sidecar bridge (`dogsc edit --port 47321`).
  *
- * Owns discovery of projects and scrub thumbs so PreviewSurface / FrameCache
- * can stay display-only while capture/export remain on the ffmpeg sidecar.
+ * Owns discovery of projects, scrub thumbs, and recording status so the Qt
+ * shell can drive the ffmpeg sidecar without embedding capture itself.
  */
 class HostBridge : public QObject
 {
@@ -25,6 +26,7 @@ class HostBridge : public QObject
     Q_PROPERTY(qreal duration READ duration NOTIFY projectChanged)
     Q_PROPERTY(QString mediaPath READ mediaPath NOTIFY projectChanged)
     Q_PROPERTY(qreal playhead READ playhead WRITE setPlayhead NOTIFY playheadChanged)
+    Q_PROPERTY(QVariantMap recordStatus READ recordStatus NOTIFY recordStatusChanged)
 
 public:
     explicit HostBridge(QObject *parent = nullptr);
@@ -41,13 +43,18 @@ public:
     QString mediaPath() const { return m_mediaPath; }
     qreal playhead() const { return m_playhead; }
     void setPlayhead(qreal seconds);
+    QVariantMap recordStatus() const { return m_recordStatus; }
 
 public slots:
     void refresh();
     void openProject(const QString &id);
     void openFirstProject();
-    /** Fetch `/thumb?t=` JPEG and emit thumbReady for PreviewSurface. */
     void requestThumb(qreal seconds);
+    void refreshRecordStatus();
+    void startRecord();
+    void stopRecord();
+    void pauseRecord();
+    void resumeRecord();
 
 signals:
     void baseUrlChanged();
@@ -56,6 +63,7 @@ signals:
     void projectsChanged();
     void projectChanged();
     void playheadChanged();
+    void recordStatusChanged();
     void thumbReady(const QImage &image, qreal seconds);
     void error(const QString &message);
 
@@ -65,6 +73,8 @@ private:
     QUrl api(const QString &path) const;
     void getJson(const QUrl &url,
                  const std::function<void(const QJsonDocument &)> &ok);
+    void postJson(const QUrl &url, const QJsonObject &body,
+                  const std::function<void(const QJsonDocument &)> &ok);
 
     QNetworkAccessManager m_nam;
     QUrl m_baseUrl = QUrl(QStringLiteral("http://127.0.0.1:47321"));
@@ -76,4 +86,5 @@ private:
     qreal m_duration = 0;
     QString m_mediaPath;
     qreal m_playhead = 0;
+    QVariantMap m_recordStatus;
 };

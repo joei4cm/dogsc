@@ -92,6 +92,7 @@ private:
     QList<qint64> m_lru;
     QSet<qint64> m_inflight;
     QQueue<qint64> m_pending;
+    class DecodePool *m_pool = nullptr;
 };
 
 class FrameDecodeWorker : public QObject
@@ -101,8 +102,8 @@ public:
     explicit FrameDecodeWorker(QObject *parent = nullptr);
 
 public slots:
-    void decode(const QString &path, qint64 key, qreal seconds, int width, int height);
+    void decode(const QString &path, qlonglong key, qreal seconds, int width, int height);
 
 signals:
-    void finished(qint64 key, const QImage &image);
+    void finished(qlonglong key, const QImage &image);
 };

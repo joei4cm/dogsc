@@ -169,22 +169,45 @@ class LibinputPointerSampler:
 def make_pointer_sampler(display_name: str | None, geometry: dict, backend: str | None = None):
     """Pick the best available sampler for this session.
 
-    Order: explicit backend → libinput-evdev when readable → X11 PointerSampler.
+    Order: explicit backend → portal RemoteDesktop (Wayland) → libinput-evdev
+    → X11 PointerSampler.
     """
     wanted = (backend or os.environ.get("DOGSC_POINTER_BACKEND") or "").strip().lower()
-    if wanted in {"libinput", "libinput-evdev", "evdev"} or (
-        not wanted and LibinputPointerSampler.available()
-    ):
+
+    if wanted in {"portal", "portal-rd", "remotedesktop"}:
+        from dogsc.portal_pointer import PortalRemoteDesktopSampler
+
+        if not PortalRemoteDesktopSampler.available():
+            raise DogSCError("当前会话没有 xdg-desktop-portal RemoteDesktop。")
+        return PortalRemoteDesktopSampler(geometry)
+
+    if wanted in {"libinput", "libinput-evdev", "evdev"}:
         if LibinputPointerSampler.available():
             return LibinputPointerSampler(geometry)
+        raise DogSCError("没有可读的 /dev/input/event*（需要 input 组权限）。")
 
-    # Lazy import keeps X11 optional for pure Wayland hosts.
-    from dogsc.x11 import PointerSampler
+    if wanted in {"x11", "xorg"}:
+        from dogsc.x11 import PointerSampler
 
-    if display_name or os.environ.get("DISPLAY"):
         return PointerSampler(display_name or os.environ.get("DISPLAY"), geometry)
 
+    # Auto: prefer local libinput, then X11, then portal RD on Wayland.
     if LibinputPointerSampler.available():
         return LibinputPointerSampler(geometry)
 
-    raise DogSCError("没有可用的指针采样后端（需要 libinput 设备权限或 X11 DISPLAY）。")
+    if display_name or os.environ.get("DISPLAY"):
+        from dogsc.x11 import PointerSampler
+
+        return PointerSampler(display_name or os.environ.get("DISPLAY"), geometry)
+
+    try:
+        from dogsc.portal_pointer import PortalRemoteDesktopSampler
+
+        if PortalRemoteDesktopSampler.available():
+            return PortalRemoteDesktopSampler(geometry)
+    except Exception:
+        pass
+
+    raise DogSCError(
+        "没有可用的指针采样后端（需要 libinput 设备权限、X11 DISPLAY，或 portal RemoteDesktop）。"
+    )

@@ -60,7 +60,7 @@ void HostBridge::setStatus(const QString &status)
 void HostBridge::getJson(const QUrl &url, const std::function<void(const QJsonDocument &)> &ok)
 {
     QNetworkRequest req(url);
-    req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("DogSC-QtHost/0.3"));
+    req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("DogSC-QtHost/0.4"));
     QNetworkReply *reply = m_nam.get(req);
     connect(reply, &QNetworkReply::finished, this, [this, reply, ok]() {
         reply->deleteLater();
@@ -77,6 +77,24 @@ void HostBridge::getJson(const QUrl &url, const std::function<void(const QJsonDo
             return;
         }
         setConnected(true);
+        ok(doc);
+    });
+}
+
+void HostBridge::postJson(const QUrl &url, const QJsonObject &body,
+                          const std::function<void(const QJsonDocument &)> &ok)
+{
+    QNetworkRequest req(url);
+    req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("DogSC-QtHost/0.4"));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QNetworkReply *reply = m_nam.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, ok]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit error(reply->errorString());
+            return;
+        }
+        const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
         ok(doc);
     });
 }
@@ -104,6 +122,7 @@ void HostBridge::refresh()
         m_projects = list;
         emit projectsChanged();
         setStatus(QStringLiteral("ready"));
+        refreshRecordStatus();
         if (m_projectId.isEmpty() && !m_projects.isEmpty())
             openFirstProject();
     });
@@ -137,10 +156,12 @@ void HostBridge::openProject(const QString &id)
         m_duration = project.value(QStringLiteral("duration")).toDouble(
             media.value(QStringLiteral("duration")).toDouble());
 
-        // Sidecar stores media at ~/.local/share/dogsc/projects/<id>/media.mp4
-        const QString home = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
-        m_mediaPath = home + QStringLiteral("/.local/share/dogsc/projects/")
-            + m_projectId + QStringLiteral("/media.mp4");
+        m_mediaPath = project.value(QStringLiteral("media_path")).toString();
+        if (m_mediaPath.isEmpty()) {
+            const QString home = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
+            m_mediaPath = home + QStringLiteral("/.local/share/dogsc/projects/")
+                + m_projectId + QStringLiteral("/media.mp4");
+        }
 
         m_playhead = 0;
         emit projectChanged();
@@ -161,7 +182,7 @@ void HostBridge::requestThumb(qreal seconds)
     url.setQuery(query);
 
     QNetworkRequest req(url);
-    req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("DogSC-QtHost/0.3"));
+    req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("DogSC-QtHost/0.4"));
     QNetworkReply *reply = m_nam.get(req);
     connect(reply, &QNetworkReply::finished, this, [this, reply, seconds]() {
         reply->deleteLater();
@@ -179,4 +200,50 @@ void HostBridge::requestThumb(qreal seconds)
         }
         emit thumbReady(image.convertToFormat(QImage::Format_RGBA8888), seconds);
     });
+}
+
+void HostBridge::refreshRecordStatus()
+{
+    getJson(api(QStringLiteral("/api/record")), [this](const QJsonDocument &doc) {
+        if (doc.isObject())
+            m_recordStatus = doc.object().toVariantMap();
+        else
+            m_recordStatus = {};
+        emit recordStatusChanged();
+    });
+}
+
+void HostBridge::startRecord()
+{
+    postJson(api(QStringLiteral("/api/record/start")), QJsonObject{},
+             [this](const QJsonDocument &doc) {
+                 if (doc.isObject())
+                     m_recordStatus = doc.object().toVariantMap();
+                 emit recordStatusChanged();
+                 setStatus(QStringLiteral("recording"));
+             });
+}
+
+void HostBridge::stopRecord()
+{
+    postJson(api(QStringLiteral("/api/record/stop")), QJsonObject{},
+             [this](const QJsonDocument &doc) {
+                 if (doc.isObject())
+                     m_recordStatus = doc.object().toVariantMap();
+                 emit recordStatusChanged();
+                 setStatus(QStringLiteral("ready"));
+                 refresh();
+             });
+}
+
+void HostBridge::pauseRecord()
+{
+    postJson(api(QStringLiteral("/api/record/pause")), QJsonObject{},
+             [this](const QJsonDocument &) { refreshRecordStatus(); });
+}
+
+void HostBridge::resumeRecord()
+{
+    postJson(api(QStringLiteral("/api/record/resume")), QJsonObject{},
+             [this](const QJsonDocument &) { refreshRecordStatus(); });
 }
