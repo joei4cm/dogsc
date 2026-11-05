@@ -724,6 +724,22 @@ class PointerSamplerTests(unittest.TestCase):
         events = sampler.stop()
         self.assertIsInstance(events, list)
 
+    def test_portal_rd_availability_is_boolean(self):
+        from dogsc.portal_pointer import PortalRemoteDesktopSampler
+
+        self.assertIsInstance(PortalRemoteDesktopSampler.available(), bool)
+
+    def test_project_list_includes_media_path_key(self):
+        from dogsc.project import list_projects, with_media_path
+
+        # with_media_path is total on a stub project that has no files.
+        stub = with_media_path({"id": "0" * 32, "name": "stub"})
+        self.assertIn("media_path", stub)
+        projects = list_projects()
+        self.assertIsInstance(projects, list)
+        for item in projects:
+            self.assertIn("media_path", item)
+
 
 if __name__ == "__main__":
     unittest.main()

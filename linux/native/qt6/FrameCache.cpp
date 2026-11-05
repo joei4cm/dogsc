@@ -1,4 +1,5 @@
 #include "FrameCache.h"
+#include "DecodePool.h"
 
 #include <QProcess>
 #include <QSet>
@@ -10,7 +11,7 @@ FrameDecodeWorker::FrameDecodeWorker(QObject *parent)
 {
 }
 
-void FrameDecodeWorker::decode(const QString &path, qint64 key, qreal seconds,
+void FrameDecodeWorker::decode(const QString &path, qlonglong key, qreal seconds,
                                int width, int height)
 {
     QImage empty;
@@ -49,7 +50,11 @@ void FrameDecodeWorker::decode(const QString &path, qint64 key, qreal seconds,
 
 FrameCache::FrameCache(QObject *parent)
     : QObject(parent)
+    , m_pool(new DecodePool(2, this))
 {
+    connect(m_pool, &DecodePool::finished, this, [this](qlonglong key, const QImage &image) {
+        onDecoded(key, image);
+    });
 }
 
 FrameCache::~FrameCache() = default;
@@ -242,35 +247,25 @@ void FrameCache::requestKey(qint64 key, bool preferential)
 
 void FrameCache::enqueueDecode(qint64 key)
 {
+    QString path;
+    qreal fps;
     {
         QMutexLocker lock(&m_mutex);
         if (m_inflight.contains(key) || m_frames.contains(key))
             return;
         m_inflight.insert(key);
         m_pending.enqueue(key);
+        path = m_mediaPath;
+        fps = m_fps;
     }
     setBusy(true);
     setStatus(QStringLiteral("decode"));
 
-    QString path;
-    qreal fps;
-    {
-        QMutexLocker lock(&m_mutex);
-        path = m_mediaPath;
-        fps = m_fps;
-    }
     const qreal seconds = qreal(key) / fps;
     const int width = 1280;
     const int height = 720;
-
-    (void) QtConcurrent::run([this, path, key, seconds, width, height]() {
-        FrameDecodeWorker worker;
-        QImage image;
-        QObject::connect(&worker, &FrameDecodeWorker::finished,
-                         [&image](qint64, const QImage &img) { image = img; });
-        worker.decode(path, key, seconds, width, height);
-        onDecoded(key, image);
-    });
+    // Resident worker pool — warm threads, no cold QtConcurrent storm.
+    m_pool->submit(path, key, seconds, width, height);
 }
 
 void FrameCache::onDecoded(qint64 key, const QImage &image)

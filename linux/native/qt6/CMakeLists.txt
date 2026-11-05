@@ -19,6 +19,8 @@ qt_add_executable(dogsc_soft_silver_host
     IslandAnchor.h
     FrameCache.cpp
     FrameCache.h
+    DecodePool.cpp
+    DecodePool.h
     HostBridge.cpp
     HostBridge.h
 )

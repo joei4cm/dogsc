@@ -216,7 +216,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(404, "没有这个项目。")
         project_id = parts[2]
         if len(parts) == 3:
-            return self._json(migrate(load(project_id)))
+            from dogsc.project import with_media_path
+            return self._json(with_media_path(migrate(load(project_id))))
         tail = "/".join(parts[3:])
         if tail == "pointer":
             return self._json({"events": load_pointer(project_id)})

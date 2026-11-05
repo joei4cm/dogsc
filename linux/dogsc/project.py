@@ -100,15 +100,32 @@ def list_projects() -> list[dict]:
             project = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             continue
+        project_id = project.get("id")
+        media_file = directory / "media.mp4"
         found.append({
-            "id": project.get("id"),
+            "id": project_id,
             "name": project.get("name"),
             "created": project.get("created"),
             "duration": project.get("media", {}).get("duration"),
             "width": project.get("media", {}).get("width"),
             "height": project.get("media", {}).get("height"),
+            "media_path": str(media_file) if media_file.is_file() else None,
         })
     return found
+
+
+def with_media_path(project: dict) -> dict:
+    """Attach absolute media_path for Qt HostBridge / external hosts."""
+    payload = dict(project)
+    project_id = payload.get("id")
+    if not project_id:
+        return payload
+    try:
+        payload["media_path"] = str(media_path(project_id))
+    except DogSCError:
+        candidate = project_dir(project_id) / "media.mp4"
+        payload["media_path"] = str(candidate) if candidate.is_file() else None
+    return payload
 
 
 def delete(project_id: str) -> None:
