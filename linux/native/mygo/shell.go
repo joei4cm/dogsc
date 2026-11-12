@@ -7,7 +7,6 @@ import (
 )
 
 // editorShell is the Soft Silver editor chrome: stage + projects strip.
-// Preview frames stay with the sidecar / future VideoPlayer (G01).
 func (a *app) editorShell(c *ui.Context) {
 	online, errMsg, _, projects := a.sidecar.Snapshot()
 
@@ -29,28 +28,12 @@ func (a *app) editorShell(c *ui.Context) {
 			if ui.Button(c.Key("refresh"), "刷新").Radius(ssRadiusControl).Clicked() {
 				go func() {
 					a.sidecar.Refresh()
-					if a.shellWin != nil {
-						a.shellWin.Invalidate()
-					}
+					a.invalidate()
 				}()
 			}
 		})
 
-		// Stage — opaque Soft Silver panel (hero plane for preview later).
-		ui.Column(c.Key("stage")).
-			FillWidth().Grow(1).
-			Radius(ssRadiusIsland).
-			Background(ssPanel).
-			Border(1, ssOutline).
-			Padding(24).
-			Center().
-			Children(func() {
-				ui.Column(c).Gap(8).Center().Children(func() {
-					ui.Text(c, "预览舞台").FontSize(16).Bold().TextColor(ssPlatinum)
-					ui.Text(c, "GPU 预览走 MyGo ui/video（GStreamer）或沿用 Qt6 PreviewSurface").
-						FontSize(12).TextColor(ssMuted)
-				})
-			})
+		a.previewStage(c)
 
 		ui.Column(c).FillWidth().Gap(8).Children(func() {
 			ui.Text(c, "项目").FontSize(13).Bold().TextColor(ssPlatinum)
@@ -60,23 +43,35 @@ func (a *app) editorShell(c *ui.Context) {
 				return
 			}
 			ui.Row(c).Gap(8).Children(func() {
+				cur, _, _, _, _, _, _, _, _ := a.preview.snapshot()
 				for i, p := range projects {
-					if i >= 6 {
+					if i >= 8 {
 						break
 					}
 					label := p.Name
 					if label == "" {
 						label = p.ID
 					}
-					ui.Column(c.Key(fmt.Sprintf("p-%s", p.ID))).
-						Width(140).Padding(10, 12).Gap(4).
-						Radius(ssRadiusControl).
-						Background(ssPanel).
-						Border(1, ssOutline).
-						Children(func() {
-							ui.Text(c, label).FontSize(12).Bold().TextColor(ssPlatinum)
-							ui.Text(c, fmt.Sprintf("%.1fs", p.Duration)).FontSize(11).TextColor(ssMuted)
-						})
+					card := ui.Column(c.Key(fmt.Sprintf("p-%s", p.ID))).
+						Width(148).Padding(10, 12).Gap(4)
+					card.Draw(func(pr *ui.Painter, r ui.Rect) {
+						fill := ssPanel
+						if p.ID == cur {
+							fill = ui.Hex("#f7f7f8")
+						}
+						pr.FillPath(continuousCornerPath(r, ssRadiusControl), fill)
+						if p.ID == cur {
+							inner := ui.Rect{X: r.X + 0.5, Y: r.Y + 0.5, W: r.W - 1, H: r.H - 1}
+							pr.StrokePath(continuousCornerPath(inner, ssRadiusControl), 1.5, ssPlatinum.Alpha(0.35))
+						}
+					})
+					if card.Clicked() {
+						a.openProject(p.ID)
+					}
+					card.Children(func() {
+						ui.Text(c, label).FontSize(12).Bold().TextColor(ssPlatinum)
+						ui.Text(c, fmt.Sprintf("%.1fs", p.Duration)).FontSize(11).TextColor(ssMuted)
+					})
 				}
 			})
 		})

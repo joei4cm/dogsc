@@ -1,11 +1,6 @@
 // Soft Silver host rebuilt on MyGo native UI.
 //
-// View model (from mygo docs/architecture):
-//
 //	view(Go) → ui build/layout/paint → scene → gpu (GL on Linux)
-//
-// Each frame calls the view from app state. Springs (morphSpring) drive
-// Soft Silver island idle↔live morph — same pattern as Apple Soft Silver.
 //
 // Capture stays in the Python sidecar (`dogsc edit --port 47321`).
 //
@@ -27,6 +22,9 @@ type app struct {
 	islandWin *mygo.Window
 	shellWin  *mygo.Window
 	armed     bool
+	preview   previewState
+	islandW   int
+	islandH   int
 }
 
 func (a *app) invalidate() {
@@ -70,6 +68,7 @@ func main() {
 			AlwaysOnTop: true,
 			Content:     ui.View(a.recorderIsland),
 		})
+		a.syncIslandWindow(400, 120)
 		go a.poll()
 	})
 

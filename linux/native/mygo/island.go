@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -29,8 +30,18 @@ func (m islandMode) label() string {
 	}
 }
 
+func (m islandMode) size() (w, h float32) {
+	switch m {
+	case islandLive, islandPaused:
+		return 360, 72
+	case islandArmed:
+		return 320, 64
+	default:
+		return 280, 56
+	}
+}
+
 // recorderIsland is the floating Soft Silver slab (Apple NSPanel analogue).
-// Built every frame from app state — MyGo's view rebuild model.
 func (a *app) recorderIsland(c *ui.Context) {
 	online, errMsg, status, _ := a.sidecar.Snapshot()
 	mode := islandIdle
@@ -48,31 +59,22 @@ func (a *app) recorderIsland(c *ui.Context) {
 		mode = islandArmed
 	}
 
-	// Morph width/height with Apple Soft Silver spring (0.5 / ~0.82).
-	targetW, targetH := float32(280), float32(56)
-	if mode == islandLive || mode == islandPaused {
-		targetW, targetH = 360, 72
-	} else if mode == islandArmed {
-		targetW, targetH = 320, 64
-	}
-
+	targetW, targetH := mode.size()
 	root := ui.Column(c).Fill().Center().Background(ui.Transparent)
 	w := root.AnimateTo("island.w", targetW, morphSpring)
 	h := root.AnimateTo("island.h", targetH, morphSpring)
 
+	// Keep the frameless window sized/anchored to the morphing island (G03).
+	a.syncIslandWindow(int(w+40), int(h+40))
+
 	ui.Column(c).Fill().Center().Children(func() {
 		slab := ui.Column(c.Key("island")).
 			Width(w).Height(h).
-			Radius(ssRadiusIsland).
-			Background(ssPanel).
-			Border(1, ssOutline).
-			Padding(10, 14).
-			Gap(8).
-			Shadow(0, 1.5, 4, 0, ui.RGBA(0, 0, 0, 0.06)).
-			Shadow(0, 8, 18, 0, ui.RGBA(0, 0, 0, 0.08)).
-			Shadow(0, 18, 44, 0, ui.RGBA(0, 0, 0, 0.06))
+			Padding(10, 14).Gap(8)
+		slab.Draw(func(p *ui.Painter, r ui.Rect) {
+			paintSoftSilverIsland(p, r, ssRadiusIsland)
+		})
 
-		// Press scale 0.96 — Soft Silver control feedback.
 		pressTarget := float32(1)
 		if slab.Pressed() {
 			pressTarget = 0.96
@@ -107,6 +109,36 @@ func (a *app) recorderIsland(c *ui.Context) {
 				a.islandButtons(c, mode, online)
 			})
 		})
+	})
+}
+
+func (a *app) syncIslandWindow(w, h int) {
+	if a.islandWin == nil || w < 120 || h < 80 {
+		return
+	}
+	if a.islandW == w && a.islandH == h {
+		return
+	}
+	a.islandW, a.islandH = w, h
+	ww, hh := w, h
+	win := a.islandWin
+	// Geometry from a goroutine via Update — never nest Screen calls inside
+	// the view build (avoids main-thread re-entrancy).
+	go win.Update(func() {
+		d := mygo.Screen.PrimaryDisplay()
+		work := d.WorkArea
+		if work.Width <= 0 || work.Height <= 0 {
+			work = d.Bounds
+		}
+		if work.Width <= 0 {
+			return
+		}
+		x := work.X + (work.Width-ww)/2
+		y := work.Y + work.Height - hh - 28
+		if y < work.Y {
+			y = work.Y
+		}
+		win.SetBounds(mygo.Rectangle{X: x, Y: y, Width: ww, Height: hh})
 	})
 }
 

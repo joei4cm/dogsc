@@ -66,9 +66,17 @@ dogsc edit --port 47321 &          # 或现有 Soft Silver sidecar
 go run ./linux/native/mygo -sidecar http://127.0.0.1:47321
 ```
 
-## 下一步（按差距排序）
+## 本轮进度（soft-silver-next）
 
-1. **G04**：fork/patch mygo，Linux 上启用 continuous corners（GL 已有路径，被 GOOS 门禁关掉）。  
-2. **G03**：录制岛改 `NewFlyout` / 屏幕锚点，贴近 NSPanel。  
-3. **G01**：`ui/video` 接 sidecar `media_path`。  
-4. 检查器 / 时间线：按 view 拆包，继续用同一套 token 与 spring。
+| 项 | 状态 |
+|---|---|
+| **G04** Linux continuous | **已用 `continuousCornerPath`（与 Qt6 ContinuousCorner 同公式）画岛/卡片**；仍可再 patch mygo `Op.Continuous` |
+| **G03** 岛锚点 | frameless + `AlwaysOnTop` + 主屏 work area **底部居中**，随 morph `SetBounds` |
+| **G01/G02** 预览 / scrub | 打开项目 → `media_path` 试 `ui/video.Open`；失败则 `/thumb?t=`；Slider scrub |
+| Sidecar | `Project` / `Thumb` / `MediaURL` |
+
+## 下一步
+
+1. 检查器 / 时间线：按 view 拆包，同一套 token + spring。  
+2. 录制岛 `NewFlyout` / layer-shell 级置顶（合成器相关）。  
+3. upstream mygo：Linux 打开 `continuousCorners`。
