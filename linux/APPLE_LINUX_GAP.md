@@ -67,7 +67,7 @@
 |---|---|---|
 | Soft Silver + 真 spring morph | **Qt 6 QML + Vulkan RHI**（预览/层壳）或 **MyGo native UI**（壳重建） | Qt6：`linux/native/qt6`；MyGo：`linux/native/mygo`（view 每帧重建 + SwiftUI 式 spring） |
 | Soft Silver 壳「像苹果一样重建」 | **MyGo `ui.View` + `AnimateTo` spring** | 状态→视图函数；岛 morph `500ms/Bounce0.18`；opaque platinum；**非** Liquid Glass |
-| Continuous 圆角 on MyGo/Linux | patch mygo `continuousCorners` 或继续 Qt6 SDF | mygo 默认仅 `GOOS==darwin` 画 continuous |
+| Continuous 圆角 on MyGo/Linux | **`continuousCornerPath`（与 Qt6 同公式）已画岛**；亦可 patch mygo `Op.Continuous` | mygo 默认仅 `GOOS==darwin`；DogSC 侧已绕过 |
 | 快速复用现有 Soft Silver CSS | **Tauri 2 + wgpu** | 留 web chrome，换预览表面 |
 | Ubuntu Wayland 采集 | **xdg-desktop-portal + PipeWire**（已有）/ GTK4+GStreamer | 门户契合度最高 |
 | 指针轨迹 | **libinput-evdev / X11**（已有）+ 未来 portal RD | 见 `linux/dogsc/pointer.py` |

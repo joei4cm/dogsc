@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 )
@@ -97,6 +101,43 @@ func (s *Sidecar) PauseRecord() error {
 func (s *Sidecar) ResumeRecord() error {
 	_, err := s.post("/api/record/resume", nil)
 	return err
+}
+
+// Project loads `/api/projects/:id` (includes media_path when available).
+func (s *Sidecar) Project(id string) (Project, error) {
+	var raw map[string]any
+	if err := s.getJSON("/api/projects/"+url.PathEscape(id), &raw); err != nil {
+		return Project{}, err
+	}
+	p := projectFromMap(raw)
+	if p.ID == "" {
+		p.ID = id
+	}
+	return p, nil
+}
+
+// Thumb fetches `/api/projects/:id/thumb?t=` as a decoded image.
+func (s *Sidecar) Thumb(id string, at float64) (image.Image, error) {
+	path := fmt.Sprintf("/api/projects/%s/thumb?t=%s", url.PathEscape(id), url.QueryEscape(fmt.Sprintf("%g", at)))
+	resp, err := s.Client.Get(s.Base + path)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("%s: HTTP %d", path, resp.StatusCode)
+	}
+	img, _, err := image.Decode(bytes.NewReader(body))
+	return img, err
+}
+
+// MediaURL is the HTTP range source for a project's screen capture.
+func (s *Sidecar) MediaURL(id string) string {
+	return s.Base + "/api/projects/" + url.PathEscape(id) + "/media"
 }
 
 func (s *Sidecar) getRecord() (RecordStatus, error) {
