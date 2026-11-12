@@ -15,7 +15,21 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Check macOS signing secrets
+        id: signing
+        env:
+          SIGNING_CERTIFICATE_P12: ${{ secrets.DOGSC_SIGNING_CERTIFICATE_P12 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SIGNING_CERTIFICATE_P12:-}" ]]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping macOS DMG release — DOGSC_SIGNING_* secrets are not configured on this fork. Linux Soft Silver release still publishes."
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Validate release inputs
+        if: steps.signing.outputs.present == 'true'
         run: |
           set -euo pipefail
           [[ -s ".github/release-notes/${GITHUB_REF_NAME}.md" ]]
@@ -29,6 +43,7 @@ jobs:
           done
 
       - name: Import stable signing identity
+        if: steps.signing.outputs.present == 'true'
         env:
           SIGNING_CERTIFICATE_P12: ${{ secrets.DOGSC_SIGNING_CERTIFICATE_P12 }}
           SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.DOGSC_SIGNING_CERTIFICATE_PASSWORD }}
@@ -75,6 +90,7 @@ jobs:
           echo "DOGSC_SIGNING_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
 
       - name: Build app
+        if: steps.signing.outputs.present == 'true'
         env:
           DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
           SIGNING_IDENTITY: ${{ secrets.DOGSC_SIGNING_IDENTITY_SHA1 }}
@@ -171,6 +187,7 @@ jobs:
           grep -F 'anchor apple generic' <<< "$requirements"
 
       - name: Create disk image
+        if: steps.signing.outputs.present == 'true'
         run: |
           set -euo pipefail
 
@@ -258,6 +275,7 @@ jobs:
           trap - EXIT
 
       - name: Generate signed update feed
+        if: steps.signing.outputs.present == 'true'
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.DOGSC_SPARKLE_PRIVATE_KEY }}
         run: |
@@ -295,6 +313,7 @@ jobs:
           grep -F 'sparkle:edSignature=' "$appcast"
 
       - name: Prepare release draft
+        if: steps.signing.outputs.present == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
