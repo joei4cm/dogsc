@@ -1,0 +1,65 @@
+name: Linux Soft Silver Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate release notes
+        run: |
+          set -euo pipefail
+          [[ -s ".github/release-notes/${GITHUB_REF_NAME}.md" ]]
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.3"
+          cache-dependency-path: linux/native/mygo/go.sum
+
+      - name: Test Soft Silver packages
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python3 -m unittest discover -s linux/tests -v
+          (cd linux/native/mygo && go test ./...)
+
+      - name: Package Soft Silver Linux tarball
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          chmod +x linux/native/mygo/package_release.sh
+          linux/native/mygo/package_release.sh "$version" "$RUNNER_TEMP/dist"
+          ls -lh "$RUNNER_TEMP/dist"
+
+      - name: Publish or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          asset="$RUNNER_TEMP/dist/DogSC-${version}-linux-amd64-soft-silver.tar.gz"
+          checksum="$asset.sha256"
+          notes=".github/release-notes/${GITHUB_REF_NAME}.md"
+          title="DogSC ${GITHUB_REF_NAME}"
+
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$asset" "$checksum" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              "$asset" \
+              "$checksum" \
+              --notes-file "$notes" \
+              --title "$title" \
+              --verify-tag
+          fi
