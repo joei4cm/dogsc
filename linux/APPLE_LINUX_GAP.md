@@ -1,6 +1,6 @@
 # Apple Soft Silver ↔ Linux：像素 / 功能 Gap 与更优实现
 
-对照基线：`Sources/DogSCApp/*` Soft Silver 原版 vs `linux/dogsc/web-*` Soft Silver 桥 + `linux/native/qt6`。
+对照基线：`Sources/DogSCApp/*` Soft Silver 原版 vs `linux/dogsc/web-*` Soft Silver 桥 + `linux/native/qt6` + **`linux/native/mygo`（MyGo 壳重建）**。
 
 ## P0（体验或预览真相源）
 
@@ -65,12 +65,14 @@
 
 | 需求（Apple） | 更优 Linux 栈 | 说明 |
 |---|---|---|
-| Soft Silver + 真 spring morph | **Qt 6 QML + Vulkan RHI**（parity 推荐） | 见 `linux/native/qt6`：PreviewSurface / RecorderIsland / ContinuousSdf / IslandAnchor |
+| Soft Silver + 真 spring morph | **Qt 6 QML + Vulkan RHI**（预览/层壳）或 **MyGo native UI**（壳重建） | Qt6：`linux/native/qt6`；MyGo：`linux/native/mygo`（view 每帧重建 + SwiftUI 式 spring） |
+| Soft Silver 壳「像苹果一样重建」 | **MyGo `ui.View` + `AnimateTo` spring** | 状态→视图函数；岛 morph `500ms/Bounce0.18`；opaque platinum；**非** Liquid Glass |
+| Continuous 圆角 on MyGo/Linux | patch mygo `continuousCorners` 或继续 Qt6 SDF | mygo 默认仅 `GOOS==darwin` 画 continuous |
 | 快速复用现有 Soft Silver CSS | **Tauri 2 + wgpu** | 留 web chrome，换预览表面 |
 | Ubuntu Wayland 采集 | **xdg-desktop-portal + PipeWire**（已有）/ GTK4+GStreamer | 门户契合度最高 |
 | 指针轨迹 | **libinput-evdev / X11**（已有）+ 未来 portal RD | 见 `linux/dogsc/pointer.py` |
 
-**结论：** Web Soft Silver 已收齐可复刻块（**G09–G52**，**G38 明示不可达终态**）。P0 Qt6 路径已落地：**G01** QSGPlainTexture/QRhi + `presentNativeTexture`、**G02** `FrameCache`/`DecodePool`/`HostBridge` scrub、**G03** frameless 岛 + layer-shell、**G04** continuous SDF、**G06** libinput/X11/portal-RD 指针流。后续增强（生产 DMA-BUF 导出器、EIS 事件流、进程内 demuxer seek）不阻断 parity 收口。
+**结论：** Web Soft Silver 已收齐可复刻块（**G09–G52**，**G38 明示不可达终态**）。P0 Qt6 路径已落地：**G01** QSGPlainTexture/QRhi + `presentNativeTexture`、**G02** `FrameCache`/`DecodePool`/`HostBridge` scrub、**G03** frameless 岛 + layer-shell、**G04** continuous SDF、**G06** libinput/X11/portal-RD 指针流。视觉壳的下一步是 **MyGo Soft Silver host**（`linux/native/mygo`）：用 Go view 重建岛/舞台，sidecar 不变。后续增强（生产 DMA-BUF、EIS、进程内 demuxer、mygo Linux continuous）不阻断功能 parity 收口。
 
 ## Oil Pro 视觉复拍（本轮）
 
